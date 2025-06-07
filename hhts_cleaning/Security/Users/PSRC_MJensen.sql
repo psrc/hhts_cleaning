@@ -1,0 +1,5 @@
+IF NOT EXISTS (SELECT * FROM master.dbo.syslogins WHERE loginname = N'PSRC\MJensen')
+CREATE LOGIN [PSRC\MJensen] FROM WINDOWS
+GO
+CREATE USER [PSRC\MJensen] FOR LOGIN [PSRC\MJensen]
+GO

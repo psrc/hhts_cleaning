@@ -1,0 +1,7 @@
+CREATE TABLE [HHSurvey].[NOSPurposes]
+(
+[purpose_id] [int] NOT NULL
+) ON [PRIMARY]
+GO
+ALTER TABLE [HHSurvey].[NOSPurposes] ADD CONSTRAINT [PK__NOSPurpo__8ED1FDD8B04093A4] PRIMARY KEY CLUSTERED ([purpose_id]) ON [PRIMARY]
+GO

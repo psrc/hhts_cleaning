@@ -1,0 +1,5 @@
+IF NOT EXISTS (SELECT * FROM master.dbo.syslogins WHERE loginname = N'PSRC\Clam')
+CREATE LOGIN [PSRC\Clam] FROM WINDOWS
+GO
+CREATE USER [PSRC\Clam] FOR LOGIN [PSRC\Clam]
+GO
