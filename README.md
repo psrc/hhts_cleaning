@@ -1,0 +1,1 @@
+### This repo contains the DDL code that defines the `hhts_cleaning` database on SQLserver.
