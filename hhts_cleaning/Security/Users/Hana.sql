@@ -1,0 +1,2 @@
+CREATE USER [Hana] FOR LOGIN [Hana]
+GO

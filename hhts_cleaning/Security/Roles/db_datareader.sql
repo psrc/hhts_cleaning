@@ -1,3 +1,5 @@
+
+EXEC sp_addrolemember N'db_datareader', N'Hana'
 ALTER ROLE [db_datareader] ADD MEMBER [PSRC\BLee]
 GO
 ALTER ROLE [db_datareader] ADD MEMBER [PSRC\Clam]
