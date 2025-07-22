@@ -1,0 +1,11 @@
+SET QUOTED_IDENTIFIER ON
+GO
+SET ANSI_NULLS ON
+GO
+    create FUNCTION [dbo].[LocalToUtc] (@localTime DATETIME2)
+    RETURNS DATETIME2
+    AS
+    BEGIN
+        RETURN CAST(@localTime AT TIME ZONE 'Pacific Standard Time' AT TIME ZONE 'UTC' AS DATETIME2);
+    END
+GO
