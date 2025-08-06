@@ -3,3 +3,5 @@ CREATE TABLE [HHSurvey].[NullFlags]
 [flag_value] [int] NOT NULL
 ) ON [PRIMARY]
 GO
+ALTER TABLE [HHSurvey].[NullFlags] ADD CONSTRAINT [PK__NullFlag__1F376D051FFE44BE] PRIMARY KEY CLUSTERED ([flag_value]) ON [PRIMARY]
+GO

@@ -1,72 +1,3 @@
-CREATE TABLE [History].[HHSurvey__Household]
-(
-[diary_platform] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[hh_weight_2023] [float] NULL,
-[hhid] [decimal] (19, 0) NOT NULL,
-[num_complete_thu] [float] NULL,
-[num_complete_tue] [float] NULL,
-[num_days_complete_weekday] [float] NULL,
-[num_days_complete_weekend] [float] NULL,
-[num_participants] [float] NULL,
-[num_trips] [float] NULL,
-[numdayscomplete] [float] NULL,
-[prev_home_notwa_city] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[prev_home_notwa_zip] [float] NULL,
-[prev_res_factors_specify] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[reported_lat] [float] NULL,
-[reported_lng] [float] NULL,
-[sample_lat] [float] NULL,
-[sample_lng] [float] NULL,
-[signup_platform] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[survey_year] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[traveldate_end] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[traveldate_start] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[hh_is_complete] [float] NULL,
-[hhgroup] [float] NULL,
-[hhincome_broad] [float] NULL,
-[hhincome_detailed] [float] NULL,
-[hhincome_followup] [float] NULL,
-[hhsize] [float] NULL,
-[home_in_region] [float] NULL,
-[num_students] [float] NULL,
-[num_surveyable] [float] NULL,
-[numadults] [float] NULL,
-[numchildren] [float] NULL,
-[numworkers] [float] NULL,
-[prev_home_notwa_state] [float] NULL,
-[prev_home_wa] [float] NULL,
-[prev_rent_own] [float] NULL,
-[prev_res_factors_amenities] [float] NULL,
-[prev_res_factors_community_change] [float] NULL,
-[prev_res_factors_crime] [float] NULL,
-[prev_res_factors_employment] [float] NULL,
-[prev_res_factors_forced] [float] NULL,
-[prev_res_factors_hh_size] [float] NULL,
-[prev_res_factors_housing_cost] [float] NULL,
-[prev_res_factors_income_change] [float] NULL,
-[prev_res_factors_less_space] [float] NULL,
-[prev_res_factors_more_space] [float] NULL,
-[prev_res_factors_no_answer] [float] NULL,
-[prev_res_factors_other] [float] NULL,
-[prev_res_factors_quality] [float] NULL,
-[prev_res_factors_school] [float] NULL,
-[prev_res_factors_telework] [float] NULL,
-[prev_res_type] [float] NULL,
-[rent_own] [float] NULL,
-[res_dur] [float] NULL,
-[res_type] [float] NULL,
-[sample_segment] [float] NULL,
-[vehicle_count] [float] NULL,
-[home_geog] [sys].[geography] NULL,
-[home_lat] [float] NULL,
-[home_lng] [float] NULL,
-[sample_geog] [sys].[geography] NULL,
-[valid_from] [datetime2] NOT NULL,
-[valid_to] [datetime2] NOT NULL
-) ON [PRIMARY]
-GO
-CREATE CLUSTERED INDEX [ix_HHSurvey__Household] ON [History].[HHSurvey__Household] ([valid_to], [valid_from]) ON [PRIMARY]
-GO
 CREATE TABLE [HHSurvey].[Household]
 (
 [diary_platform] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
@@ -129,16 +60,10 @@ CREATE TABLE [HHSurvey].[Household]
 [home_geog] [sys].[geography] NULL,
 [home_lat] [float] NULL,
 [home_lng] [float] NULL,
-[sample_geog] [sys].[geography] NULL,
-[valid_from] [datetime2] GENERATED ALWAYS AS ROW START HIDDEN NOT NULL CONSTRAINT [HHSurvey_Household_valid_from_default] DEFAULT (sysutcdatetime()),
-[valid_to] [datetime2] GENERATED ALWAYS AS ROW END HIDDEN NOT NULL CONSTRAINT [HHSurvey_Household_valid_to_default] DEFAULT ('9999-12-31 23:59:59.9999999'),
-PERIOD FOR SYSTEM_TIME (valid_from, valid_to),
-CONSTRAINT [PK_hhid] PRIMARY KEY CLUSTERED ([hhid]) WITH (FILLFACTOR=80) ON [PRIMARY]
+[sample_geog] [sys].[geography] NULL
 ) ON [PRIMARY]
-WITH
-(
-SYSTEM_VERSIONING = ON (HISTORY_TABLE = [History].[HHSurvey__Household])
-)
+GO
+ALTER TABLE [HHSurvey].[Household] ADD CONSTRAINT [PK_hhid] PRIMARY KEY CLUSTERED ([hhid]) WITH (FILLFACTOR=80) ON [PRIMARY]
 GO
 CREATE SPATIAL INDEX [home_geog_idx] ON [HHSurvey].[Household] ([home_geog]) WITH (CELLS_PER_OBJECT = 12) ON [PRIMARY]
 GO

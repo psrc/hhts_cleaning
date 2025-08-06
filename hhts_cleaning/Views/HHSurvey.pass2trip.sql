@@ -6,15 +6,13 @@ GO
 	AS
 	SELECT t.[recid]
 		   ,h.[hhid]
-		   ,t.[person_id] AS personid
+		   ,t.[person_id] AS person_id
 		   ,t.[pernum]
 		   ,t.[tripid]
 		   ,t.[tripnum]
 		   ,t.[traveldate]
 		   ,t.[daynum]
 		   ,CASE WHEN h.hhgroup=11 THEN 'rMove' ELSE 'rSurvey' END AS hhgroup
-		   ,t.[copied_trip]
-		   ,t.[svy_complete]
 		   ,t.[depart_time_timestamp]
 		   ,t.[arrival_time_timestamp]
 		   ,'' AS origin_name

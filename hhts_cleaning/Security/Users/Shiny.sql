@@ -1,0 +1,2 @@
+CREATE USER [Shiny] FOR LOGIN [Shiny]
+GO
