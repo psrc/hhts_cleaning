@@ -30,7 +30,7 @@ GO
                                        dest_lat, 
                                        dest_lng, 
                                        depart_time_timestamp, 
-                                       arrival_time_timestamp, /*travel_time,*/ 
+                                       arrival_time_timestamp,
                                        distance_miles,
                                        origin_purpose, 
                                        dest_purpose, 
@@ -59,18 +59,17 @@ GO
                    t.person_id, 
                    t.pernum, 
                    t.day_id,
-                   1, 
-                   0,
-                   t.dest_lat, -- dest of previous trip as origin of reverse trip
-                   t.dest_lng, 
-                   t.origin_lat,  -- origin of previous trip as dest of reverse trip
-                   t.origin_lng, 
+                   1 AS psrc_inserted, 
+                   0 AS tripnum,
+                   t.dest_lat AS origin_lat, -- dest of previous trip as origin of reverse trip
+                   t.dest_lng AS origin_lng, 
+                   t.origin_lat AS dest_lat,  -- origin of previous trip as dest of reverse trip
+                   t.origin_lng AS dest_lng, 
                    cte.depart_time_timestamp, 
                    DATEADD(minute, cte.travel_time_elapsed, cte.depart_time_timestamp) AS arrival_time_timestamp,
-                   /*t.travel_time,*/ 
                    t.distance_miles,
-                   t.dest_purpose,   -- dest purpose of previous trip as origin purpose of reverse trip
-                   t.origin_purpose,  -- origin purpose of previous trip as dest purpose of reverse trip
+                   t.dest_purpose AS origin_purpose,   -- dest purpose of previous trip as origin purpose of reverse trip
+                   t.origin_purpose AS dest_purpose,  -- origin purpose of previous trip as dest purpose of reverse trip
                    t.modes, 
                    t.mode_acc, 
                    t.mode_1,mode_2, mode_3, mode_4,
@@ -78,20 +77,20 @@ GO
                    t.travelers_hh, 
                    t.travelers_nonhh, 
                    t.travelers_total,
-                   -995,
-                   -995,
-                   -995,
-                   -995,
-                   -995,
-                   -995,
-                   -995,
-                   -995,
-                   -995,
-                   -995,
-                   -995,
-                   -995,
-                   -995,
-                   -995
+                   -992 AS driver,
+                   -992 AS hhmember1,
+                   -992 AS hhmember2,
+                   -992 AS hhmember3,
+                   -992 AS hhmember4,
+                   -992 AS hhmember5,
+                   -992 AS hhmember6,
+                   -992 AS hhmember7,
+                   -992 AS hhmember8,
+                   -992 AS hhmember9,
+                   -992 AS hhmember10,
+                   -992 AS hhmember11,
+                   -992 AS hhmember12,
+                   -992 AS hhmember13
 			FROM HHSurvey.Trip AS t 
             JOIN cte ON t.recid=cte.recid;
 
