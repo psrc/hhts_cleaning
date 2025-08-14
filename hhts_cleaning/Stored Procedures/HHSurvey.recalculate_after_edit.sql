@@ -21,7 +21,7 @@ GO
                                         THEN  t.distance_miles / (CAST(DATEDIFF_BIG (second, t.depart_time_timestamp, t.arrival_time_timestamp) AS numeric)/3600) 
                                         ELSE 0 END,
             t.travel_time 	= CAST(DATEDIFF(second, t.depart_time_timestamp, t.arrival_time_timestamp) AS numeric)/60,  -- for edited records, this should be the accepted travel duration
-            t.traveldate        = CAST(DATEADD(hour, 3, t.depart_time_timestamp) AS date),			   	
+            t.traveldate        = CAST(DATEADD(hour, -3, t.depart_time_timestamp) AS date),			   	
             t.dest_geog = geography::STGeomFromText('POINT(' + CAST(t.dest_lng AS VARCHAR(20)) + ' ' + CAST(t.dest_lat AS VARCHAR(20)) + ')', 4326), 
             t.origin_geog  = geography::STGeomFromText('POINT(' + CAST(t.origin_lng AS VARCHAR(20)) + ' ' + CAST(t.origin_lat AS VARCHAR(20)) + ')', 4326) 
         FROM HHSurvey.Trip AS t JOIN cte ON t.person_id = cte.person_id
