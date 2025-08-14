@@ -6,6 +6,8 @@ GO
 				@recid_list nvarchar(255) NULL --Parameter necessary to have passed: comma-separated recids to be linked (not limited to two)
 			AS BEGIN
 			SET NOCOUNT ON; 
+			
+			DROP TABLE IF EXISTS HHSurvey.trip_ingredient;
 
 			-- insert recid's into #recid_list
 			SELECT CAST(Elmer.dbo.TRIM(value) AS int) AS recid INTO #recid_list 
