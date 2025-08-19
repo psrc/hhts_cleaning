@@ -1,3 +1,5 @@
 CREATE SCHEMA [HHSurvey]
 AUTHORIZATION [dbo]
 GO
+GRANT EXECUTE ON SCHEMA:: [HHSurvey] TO [db_spexecute]
+GO
