@@ -30,7 +30,7 @@ BEGIN
             MAX((CASE WHEN ti_agg.travelers_hh 			IN (995) THEN -1 ELSE 1 END) * ti_agg.travelers_hh 			 ) AS travelers_hh, 				
             MAX((CASE WHEN ti_agg.travelers_nonhh 		IN (995) THEN -1 ELSE 1 END) * ti_agg.travelers_nonhh 		 ) AS travelers_nonhh,				
             MAX((CASE WHEN ti_agg.travelers_total 		IN (995) THEN -1 ELSE 1 END) * ti_agg.travelers_total 		 ) AS travelers_total								
-        FROM #trip_ingredient as ti_agg WHERE ti_agg.trip_link > 0 GROUP BY ti_agg.person_id, ti_agg.trip_link),
+        FROM HHSurvey.trip_ingredient as ti_agg WHERE ti_agg.trip_link > 0 GROUP BY ti_agg.person_id, ti_agg.trip_link),
     cte_wndw AS	
     (SELECT 
             ti_wndw.person_id AS person_id2,
@@ -46,12 +46,12 @@ BEGIN
             --STRING_AGG(ti_wnd.modes,',') 		OVER (PARTITION BY ti_wnd.trip_link ORDER BY ti_wndw.tripnum ASC) AS modes, -- This can be used once we upgrade from MSSQL16
             Elmer.dbo.TRIM(Elmer.dbo.rgx_replace(STUFF(
                 (SELECT ',' + ti1.modes
-                FROM #trip_ingredient AS ti1 
+                FROM HHSurvey.trip_ingredient AS ti1 
                 WHERE ti1.person_id = ti_wndw.person_id AND ti1.trip_link = ti_wndw.trip_link
                 GROUP BY ti1.modes
                 ORDER BY ti_wndw.person_id DESC, ti_wndw.tripnum DESC
                 FOR XML PATH('')), 1, 1, NULL),'(-?\b\d+\b),(?=\b\1\b)','',1)) AS modes
-        FROM #trip_ingredient as ti_wndw WHERE ti_wndw.trip_link > 0 )
+        FROM HHSurvey.trip_ingredient as ti_wndw WHERE ti_wndw.trip_link > 0 )
     SELECT DISTINCT cte_wndw.*, cte_agg.* INTO #linked_trips
         FROM cte_wndw JOIN cte_agg ON cte_wndw.person_id2 = cte_agg.person_id AND cte_wndw.trip_link2 = cte_agg.trip_link;
 
@@ -77,7 +77,7 @@ BEGIN
 
     -- delete the components that will get replaced with linked trips
     DELETE t
-    FROM HHSurvey.Trip AS t JOIN #trip_ingredient AS ti ON t.recid=ti.recid
+    FROM HHSurvey.Trip AS t JOIN HHSurvey.trip_ingredient AS ti ON t.recid=ti.recid
         WHERE t.tripnum <> ti.trip_link AND EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE ti.person_id = lt.person_id AND ti.trip_link = lt.trip_link);	
 
     -- this update achieves trip linking via revising elements of the 1st component (purposely left in the trip table).		
@@ -115,9 +115,9 @@ BEGIN
 
     --move the ingredients to another named table so this procedure can be re-run as sproc during manual cleaning
 
-    DELETE FROM #trip_ingredient
+    DELETE FROM HHSurvey.trip_ingredient
     OUTPUT deleted.* INTO HHSurvey.trip_ingredients_done
-    WHERE #trip_ingredient.trip_link > 0;
+    WHERE HHSurvey.trip_ingredient.trip_link > 0;
 
     /* STEP 6.	Mode number standardization, including access and egress characterization */
 
@@ -220,7 +220,7 @@ BEGIN
     UPDATE HHSurvey.Trip SET mode_egr = 995 WHERE mode_egr IS NULL;
 
     --temp tables should disappear when the spoc ends, but to be tidy we explicitly delete them.
-    DROP TABLE IF EXISTS #trip_ingredient
+    DROP TABLE IF EXISTS HHSurvey.trip_ingredient
     DROP TABLE IF EXISTS #linked_trips
     EXEC HHSurvey.recalculate_after_edit;
 
