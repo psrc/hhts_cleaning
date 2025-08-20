@@ -11,7 +11,7 @@ AS BEGIN
 
     BEGIN TRANSACTION  ;  
           CREATE TABLE HHSurvey.Trip (
-               [recid] [int] IDENTITY NOT NULL,
+               [recid] decimal(19,0) IDENTITY NOT NULL,
                [hhid] decimal(19,0) NOT NULL,
                [person_id] decimal(19,0) NOT NULL,
                [pernum] [int] NULL,
@@ -49,7 +49,7 @@ AS BEGIN
                [mode_1] smallint NOT NULL,
                [mode_2] smallint NULL,
                [mode_3] smallint NULL,
-               --[mode_4] smallint NULL,
+               [mode_4] smallint NULL,
                [driver] smallint NULL,                            
                [mode_acc] smallint NULL,
                [mode_egr] smallint NULL,
@@ -98,7 +98,7 @@ AS BEGIN
                ,[mode_1]
                ,[mode_2]
                ,[mode_3]
-               --,[mode_4]            
+               ,[mode_4]            
                ,[driver]              
                ,[mode_acc]
                ,[mode_egr]               
@@ -151,14 +151,14 @@ AS BEGIN
                ,cast([mode_1] as smallint)
                ,cast([mode_2] as smallint)
                ,cast([mode_3] as smallint)
-               --,cast([mode_4] as smallint)
+               ,cast([mode_4] as smallint)
                ,cast([driver] as smallint) 
                ,cast([mode_acc] as smallint)
                ,cast([mode_egr] as smallint)
                ,CAST(speed_mph AS [float])
                ,CAST(day_id AS bigint)
                ,CAST(mode_other_specify as nvarchar(1000))
-               FROM Elmer.stg.hhsurvey25_unlinked_trip
+               FROM HouseholdTravelSurvey2025.dbo.ex_trip_unlinked
                ORDER BY tripid;
           COMMIT TRANSACTION;
 
