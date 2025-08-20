@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE PROCEDURE [HHSurvey].[after_edits]
+CREATE PROCEDURE [HHSurvey].[shifixy_after_edits]
     @target_person_id decimal = NULL -- optional default
 AS
 BEGIN

@@ -42,7 +42,7 @@ AS BEGIN
         (SELECT t1.recid, t1.person_id, t1.tripnum,	           				   			                  'ends day, not home' AS error_flag
         FROM trip_ref AS t1 JOIN hhts_cleaning.HHSurvey.Household AS h ON t1.hhid = h.hhid
         LEFT JOIN trip_ref AS t_next ON t1.person_id = t_next.person_id AND t1.tripnum + 1 = t_next.tripnum
-            JOIN HHSurvey.Person AS p1 ON t1.person_id=p1.person_id AND p1.age_detailed BETWEEN 5 AND 12
+            JOIN HHSurvey.Person AS p1 ON t1.person_id=p1.person_id AND p1.age_detailed > 17
             WHERE DATEDIFF(Day, (CASE WHEN DATEPART(Hour, t1.arrival_time_timestamp) < 3 
                                       THEN DATEADD(Hour, -3, t1.arrival_time_timestamp) 
                                       ELSE t1.arrival_time_timestamp END),
@@ -94,11 +94,7 @@ AS BEGIN
         UNION ALL SELECT  t8.recid,  t8.person_id,  t8.tripnum,									        	'underage_detailed driver' AS error_flag
             FROM hhts_cleaning.HHSurvey.Person AS p
             JOIN trip_ref AS t8 ON p.person_id = t8.person_id
-            WHERE t8.driver = 1 AND (p.age_detailed BETWEEN 1 AND 3)
-
-        UNION ALL SELECT  t9.recid,  t9.person_id,  t9.tripnum, 									      'unlicensed driver' AS error_flag
-            FROM trip_ref as t9 JOIN hhts_cleaning.HHSurvey.Person AS p ON p.person_id = t9.person_id
-            WHERE p.license = 3 AND  t9.driver = 1
+            WHERE t8.driver = 1 AND (p.age_detailed BETWEEN 0 AND 15)
 
         UNION ALL SELECT  t10.recid,  t10.person_id,  t10.tripnum, 									  'driver, no-drive mode' AS error_flag
             FROM trip_ref as t10
@@ -154,12 +150,12 @@ AS BEGIN
 
         UNION ALL SELECT t20.recid, t20.person_id, t20.tripnum,					                        'missing next trip link' AS error_flag
         FROM trip_ref AS t20 JOIN HHSurvey.Trip AS t_next ON  t20.person_id = t_next.person_id AND t20.tripnum + 1 = t_next.tripnum
-                                JOIN HHSurvey.Person AS p ON t20.person_id=p.person_id AND p.age_detailed BETWEEN 5 AND 12
+                                JOIN HHSurvey.Person AS p ON t20.person_id=p.person_id AND p.age_detailed > 17
             WHERE ABS(t20.dest_geog.STDistance(t_next.origin_geog)) > 500  --500m difference or more
 
         /*UNION ALL SELECT t_next.recid, t_next.person_id, t_next.tripnum,	              	           'missing prior trip link' AS error_flag
         FROM trip_ref AS t21 JOIN HHSurvey.Trip AS t_next ON t21.person_id = t_next.person_id AND  t21.tripnum + 1 = t_next.tripnum
-                                JOIN HHSurvey.Person AS p ON t21.person_id=p.person_id AND p.age_detailed BETWEEN 5 AND 12
+                                JOIN HHSurvey.Person AS p ON t21.person_id=p.person_id AND p.age_detailed > 17
             WHERE ABS(t21.dest_geog.STDistance(t_next.origin_geog)) > 500	--500m difference or more*/			
 
         UNION ALL SELECT t22.recid, t22.person_id, t22.tripnum,	              	 			 			 '"change mode" purpose' AS error_flag	
@@ -205,7 +201,7 @@ AS BEGIN
         UNION ALL SELECT t25.recid, t25.person_id, t25.tripnum, 		  				   		          'non-student + school trip' AS error_flag
             FROM trip_ref AS t25 JOIN HHSurvey.Trip as t_next ON t25.person_id = t_next.person_id AND t25.tripnum + 1 = t_next.tripnum JOIN hhts_cleaning.HHSurvey.Person ON t25.person_id=person.person_id 					
             WHERE t25.dest_purpose IN(SELECT purpose_id FROM HHSurvey.ed_purposes)		
-                AND (person.student=1) AND person.age_detailed > 4					
+                AND (person.student=1) AND person.age_detailed > 17					
             )
 
     INSERT INTO HHSurvey.trip_error_flags (recid, person_id, tripnum, error_flag)
