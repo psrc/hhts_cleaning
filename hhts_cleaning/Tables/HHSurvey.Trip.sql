@@ -5,7 +5,7 @@ CREATE TABLE [HHSurvey].[Trip]
 [person_id] [decimal] (19, 0) NOT NULL,
 [pernum] [int] NULL,
 [tripid] [decimal] (19, 0) NULL,
-[tripnum] [int] NOT NULL CONSTRAINT [DF__Trip__tripnum__32630520] DEFAULT ((0)),
+[tripnum] [int] NOT NULL CONSTRAINT [DF__Trip__tripnum__45FFE979] DEFAULT ((0)),
 [traveldate] [datetime2] NULL,
 [daynum] [int] NULL,
 [depart_time_timestamp] [datetime2] NULL,
@@ -25,10 +25,10 @@ CREATE TABLE [HHSurvey].[Trip]
 [hhmember7] [decimal] (19, 0) NULL,
 [hhmember8] [decimal] (19, 0) NULL,
 [hhmember9] [decimal] (19, 0) NULL,
-[hhmember10] [decimal] (19, 0) NOT NULL,
-[hhmember11] [decimal] (19, 0) NOT NULL,
-[hhmember12] [decimal] (19, 0) NOT NULL,
-[hhmember13] [decimal] (19, 0) NOT NULL,
+[hhmember10] [decimal] (19, 0) NULL,
+[hhmember11] [decimal] (19, 0) NULL,
+[hhmember12] [decimal] (19, 0) NULL,
+[hhmember13] [decimal] (19, 0) NULL,
 [travelers_hh] [int] NOT NULL,
 [travelers_nonhh] [int] NOT NULL,
 [travelers_total] [int] NOT NULL,
@@ -60,4 +60,18 @@ CREATE TABLE [HHSurvey].[Trip]
 ) ON [PRIMARY]
 GO
 ALTER TABLE [HHSurvey].[Trip] ADD CONSTRAINT [PK_recid] PRIMARY KEY CLUSTERED ([recid]) WITH (FILLFACTOR=80) ON [PRIMARY]
+GO
+CREATE NONCLUSTERED INDEX [dest_purpose_idx] ON [HHSurvey].[Trip] ([dest_purpose]) ON [PRIMARY]
+GO
+CREATE NONCLUSTERED INDEX [person_idx] ON [HHSurvey].[Trip] ([person_id]) ON [PRIMARY]
+GO
+CREATE NONCLUSTERED INDEX [person_tripnum_idx] ON [HHSurvey].[Trip] ([person_id], [tripnum]) ON [PRIMARY]
+GO
+CREATE NONCLUSTERED INDEX [travelers_total_idx] ON [HHSurvey].[Trip] ([travelers_total]) ON [PRIMARY]
+GO
+CREATE NONCLUSTERED INDEX [tripnum_idx] ON [HHSurvey].[Trip] ([tripnum]) ON [PRIMARY]
+GO
+CREATE SPATIAL INDEX [dest_geog_idx] ON [HHSurvey].[Trip] ([dest_geog]) WITH (CELLS_PER_OBJECT = 12) ON [PRIMARY]
+GO
+CREATE SPATIAL INDEX [origin_geog_idx] ON [HHSurvey].[Trip] ([origin_geog]) WITH (CELLS_PER_OBJECT = 12) ON [PRIMARY]
 GO
