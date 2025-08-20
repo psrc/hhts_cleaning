@@ -10,7 +10,7 @@ AS BEGIN
     COMMIT TRANSACTION;
 
     BEGIN TRANSACTION;
-    SELECT t.recid, t.dest_lat, t.dest_lng, DATEDIFF(Minute, t.arrival_time_timestamp, nxt.depart_time_timestamp) AS dwell, p.age_detailed, p.student, CAST('' AS nvarchar(255)) AS loc_result, 0 AS new_dest_purpose
+    SELECT t.recid, t.dest_lat, t.dest_lng, DATEDIFF(Minute, t.arrival_time_timestamp, nxt.depart_time_timestamp) AS dwell, CAST('' AS nvarchar(255)) AS loc_result, 0 AS new_dest_purpose
     INTO dbo.api_purpose 
         FROM HHSurvey.Trip AS t LEFT JOIN HHSurvey.Trip AS nxt ON t.person_id = nxt.person_id AND t.tripnum +1 = nxt.tripnum JOIN HHSurvey.Person AS p ON t.person_id = p.person_id
         WHERE t.dest_purpose IN(SELECT flag_value FROM HHSurvey.NullFlags UNION SELECT 97) OR (t.dest_purpose=60 AND DATEDIFF(Minute, t.arrival_time_timestamp, nxt.depart_time_timestamp) > 60)
