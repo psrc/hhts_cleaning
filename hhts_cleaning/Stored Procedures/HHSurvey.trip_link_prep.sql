@@ -6,18 +6,18 @@ CREATE PROCEDURE [HHSurvey].[trip_link_prep]
 AS BEGIN
     -- Populate consolidated modes field, used later
     BEGIN TRANSACTION;
-    /*	These are MSSQL17 commands for the UPDATE query below--faster and clearer, once we upgrade.
-    UPDATE trip
-        SET modes 			= CONCAT_WS(',',ti_wndw.mode_acc, ti_wndw.mode_1, ti_wndw.mode_2, ti_wndw.mode_3, ti_wndw.mode_4, ti_wndw.mode_5, ti_wndw.mode_egr)
-    */
     UPDATE HHSurvey.Trip
+        SET modes = CONCAT_WS(',', mode_1, mode_2, mode_3, mode_4)
+    COMMIT TRANSACTION;
+
+/*    UPDATE HHSurvey.Trip --used before MSSQL2017
             SET modes = Elmer.dbo.TRIM(Elmer.dbo.rgx_replace(
                         STUFF(	COALESCE(',' + CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM HHSurvey.NullFlags AS nf WHERE nf.flag_value = trip.mode_1)	  THEN trip.mode_1 	 ELSE NULL END AS nvarchar), '') + 
                                 COALESCE(',' + CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM HHSurvey.NullFlags AS nf WHERE nf.flag_value = trip.mode_2)	  THEN trip.mode_2 	 ELSE NULL END AS nvarchar), '') + 
                                 COALESCE(',' + CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM HHSurvey.NullFlags AS nf WHERE nf.flag_value = trip.mode_3)   THEN trip.mode_3 	 ELSE NULL END AS nvarchar), '') + 
                                 COALESCE(',' + CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM HHSurvey.NullFlags AS nf WHERE nf.flag_value = trip.mode_4)   THEN trip.mode_4 	 ELSE NULL END AS nvarchar), ''), 1, 1, ''),
                         '(-?\b\d+\b),(?=\b\1\b)','',1));
-    COMMIT TRANSACTION;
+    */
 
     BEGIN TRANSACTION;
     -- impute mode for vehicular tour components

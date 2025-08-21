@@ -7,6 +7,9 @@ BEGIN
 
     -- meld the trip ingredients to create the fields that will populate the linked trip, and saves those as a separate table, 'linked_trip'.
     DROP TABLE IF EXISTS #linked_trips;	
+
+    UPDATE HHSurvey.Trip
+        SET modes = CONCAT_WS(',', mode_1, mode_2, mode_3, mode_4);
         
     WITH cte_agg AS
     (SELECT ti_agg.person_id,
@@ -43,7 +46,7 @@ BEGIN
             FIRST_VALUE(ti_wndw.dest_lng) 		OVER (PARTITION BY CONCAT(ti_wndw.person_id,ti_wndw.trip_link) ORDER BY ti_wndw.tripnum DESC) AS dest_lng,
             FIRST_VALUE(ti_wndw.mode_acc) 		OVER (PARTITION BY CONCAT(ti_wndw.person_id,ti_wndw.trip_link) ORDER BY ti_wndw.tripnum ASC)  AS mode_acc,
             FIRST_VALUE(ti_wndw.mode_egr) 		OVER (PARTITION BY CONCAT(ti_wndw.person_id,ti_wndw.trip_link) ORDER BY ti_wndw.tripnum DESC) AS mode_egr,
-            --STRING_AGG(ti_wnd.modes,',') 		OVER (PARTITION BY ti_wnd.trip_link ORDER BY ti_wndw.tripnum ASC) AS modes, -- This can be used once we upgrade from MSSQL16
+            --STRING_AGG(ti_wnd.modes,',') 		OVER (PARTITION BY ti_wnd.trip_link ORDER BY ti_wndw.tripnum ASC) AS modes -- Thought this would work with MSSQL2017+ but not w/ windowing
             Elmer.dbo.TRIM(Elmer.dbo.rgx_replace(STUFF(
                 (SELECT ',' + ti1.modes
                 FROM HHSurvey.trip_ingredient AS ti1 
@@ -194,15 +197,6 @@ BEGIN
 */
     -- Populate separate mode fields [[No longer removing access/egress from the beginning and end of 1) transit and 2) auto trip strings]]
         WITH cte AS 
-/*    (SELECT t1.recid, Elmer.dbo.rgx_replace(Elmer.dbo.rgx_replace(Elmer.dbo.rgx_replace(t1.modes,'\b(' + @auto_access_egress_modes + ')\b','',1),
-        '(,(?:' + @transit_access_egress_modes + '))+$','',1),'^((?:' + @transit_access_egress_modes + '),)+','',1) AS mode_reduced
-        FROM HHSurvey.Trip AS t1
-        WHERE EXISTS (SELECT 1 FROM STRING_SPLIT(t1.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.transitmodes))
-    UNION ALL 	
-    SELECT t2.recid, Elmer.dbo.rgx_replace(t2.modes,'\b(' + @auto_access_egress_modes + ')\b','',1) AS mode_reduced
-        FROM HHSurvey.Trip AS t2
-        WHERE EXISTS (SELECT 1 FROM STRING_SPLIT(t2.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.automodes))
-        AND NOT EXISTS (SELECT 1 FROM STRING_SPLIT(t2.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.transitmodes))),*/
         (SELECT t.recid, Elmer.dbo.rgx_replace(t.modes, '(?<=\b\1,.*)\b(\w+),?','',1) AS mode_reduced FROM HHSurvey.Trip AS t)
     UPDATE t
         SET mode_1 = COALESCE((SELECT match FROM Elmer.dbo.rgx_matches(cte.mode_reduced,'\b\d+\b',1) ORDER BY match_index OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY), 995),
