@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-    CREATE PROCEDURE [HHSurvey].[dest_purpose_updates] AS 
+  CREATE PROCEDURE [HHSurvey].[dest_purpose_updates] AS 
     BEGIN
         
         UPDATE t--Classify home destinations
@@ -94,7 +94,7 @@ GO
                 AND t.travelers_total < next_t.travelers_total
                 AND DATEDIFF(minute, t.arrival_time_timestamp, next_t.depart_time_timestamp) < 30;	
         
-        UPDATE t --changes code to 'family activity' when adult is present, multiple people involved and duration is from 30mins to 4hrs
+/*        UPDATE t --changes code to 'family activity' when adult is present, multiple people involved and duration is from 30mins to 4hrs
             SET t.dest_purpose = 56, t.revision_code = CONCAT(t.revision_code,'3,')
             FROM HHSurvey.Trip AS t
                 JOIN HHSurvey.person AS p ON t.person_id=p.person_id 
@@ -106,6 +106,7 @@ GO
                     --OR Elmer.dbo.rgx_find(t.dest_label,'(school|care)',1) = 1
                 )
                 AND DATEDIFF(Minute, t.arrival_time_timestamp, next_t.depart_time_timestamp) Between 30 and 240;
+*/ -- No "family activity" code anymore                
 
         UPDATE t --updates empty purpose code to 'school' when single student traveler with school destination and duration > 30 minutes; 50m proximity to school location on file
             SET t.dest_purpose = 6, t.revision_code = CONCAT(t.revision_code,'4,')
