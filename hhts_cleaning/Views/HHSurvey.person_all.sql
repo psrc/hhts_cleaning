@@ -4,9 +4,7 @@ SET ANSI_NULLS ON
 GO
 		CREATE VIEW [HHSurvey].[person_all] WITH SCHEMABINDING AS
 		SELECT 
-            p.hhid, 
             p.person_id, 
-            p.pernum, 
             p.age_detailed AS Age, 
 			CASE WHEN p.employment BETWEEN 1 AND 4 THEN 'Yes' ELSE 'No' END AS Works, 
 			CASE WHEN p.student = 1 THEN 'No' WHEN student IN(2,4,5) THEN 'PT' WHEN p.student IN(3,6,7) THEN 'FT' ELSE 'No' END AS Studies, 
