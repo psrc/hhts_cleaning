@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE PROCEDURE [HHSurvey].[impute_purpose_from_location] @BingKey nvarchar
+CREATE PROCEDURE [HHSurvey].[impute_purpose_from_location] @GoogleKey nvarchar
 AS BEGIN 
 
     BEGIN TRANSACTION;
@@ -22,8 +22,8 @@ AS BEGIN
     WHILE @i > 0
     BEGIN 
         BEGIN TRANSACTION;
-        UPDATE TOP (10) dbo.api_purpose  -- Repeat because Bing chokes on requests over 10 items
-        SET loc_result = Elmer.dbo.loc_recognize(dest_lng, dest_lat, @BingKey)
+        UPDATE TOP (10) dbo.api_purpose  -- Divide into smaller queries to avoid API limits
+        SET loc_result = Elmer.dbo.loc_recognize(dest_lng, dest_lat, @GoogleKey)
         WHERE loc_result ='';
 
         SET @i = (SELECT count(*) FROM dbo.api_purpose WHERE loc_result ='')
@@ -33,7 +33,7 @@ AS BEGIN
     BEGIN TRANSACTION;
     UPDATE a 
     SET a.new_dest_purpose=b.dest_purpose
-    FROM dbo.api_purpose AS a JOIN HHSurvey.Bing_location_types AS b ON b.location_type=a.loc_result
+    FROM dbo.api_purpose AS a JOIN HHSurvey.EntityType_purpose_lookup AS b ON b.EntityType=a.loc_result
     WHERE a.new_dest_purpose=0 AND b.dest_purpose IS NOT NULL;
 
     UPDATE t 
