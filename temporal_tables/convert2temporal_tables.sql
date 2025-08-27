@@ -81,6 +81,19 @@ go
         set (system_versioning = on (history_table = History.HHSurvey__Day));
     go
 
+-- trip_error_flags
+    alter table HHSurvey.trip_error_flags add
+        valid_from datetime2 generated always as row start HIDDEN 
+        constraint HHSurvey_trip_error_flags_valid_from_default default sysutcdatetime(),
+        valid_to datetime2 generated always as row end HIDDEN
+        constraint HHSurvey_trip_error_flags_valid_to_default default '9999-12-31 23:59:59.9999999',
+        period for SYSTEM_TIME (valid_from, valid_to)
+    go
+
+    alter table HHSurvey.trip_error_flags
+        set (system_versioning = on (history_table = History.HHSurvey__trip_error_flags));
+    go
+
 -- helper functions
     create FUNCTION dbo.LocalToUtc (@localTime DATETIME2)
     RETURNS DATETIME2
