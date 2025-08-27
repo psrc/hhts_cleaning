@@ -3,7 +3,7 @@ GO
 SET ANSI_NULLS ON
 GO
 
-CREATE PROCEDURE [HHSurvey].[revise_excessive_speed_trips] @BingKey nvarchar
+CREATE PROCEDURE [HHSurvey].[revise_excessive_speed_trips] @GoogleKey nvarchar
 AS BEGIN
 
     BEGIN TRANSACTION;
@@ -63,7 +63,7 @@ AS BEGIN
     BEGIN 
         BEGIN TRANSACTION;
         UPDATE TOP (5) [m]
-        SET m.api_result=Elmer.dbo.route_mi_min(m.origin_geog.Long, m.origin_geog.Lat, m.dest_geog.Long, m.dest_geog.Lat, m.query_mode, @BingKey)
+        SET m.api_result=Elmer.dbo.route_mi_min(m.origin_geog.Long, m.origin_geog.Lat, m.dest_geog.Long, m.dest_geog.Lat, m.query_mode, @GoogleKey)
         FROM dbo.tmpApiMiMin AS m
         WHERE m.api_result IS NULL AND m.origin_geog IS NOT NULL AND m.dest_geog IS NOT NULL AND m.query_mode IS NOT NULL;
 
@@ -101,7 +101,7 @@ AS BEGIN
     
     UPDATE dbo.tmpApiMiMin
         SET adj = -1, revision_code = CONCAT(revision_code, '13,'), 											          --where walk doesn't fit, try driving
-        tminutes = CAST(Elmer.dbo.rgx_replace(Elmer.dbo.route_mi_min(origin_geog.Long, origin_geog.Lat, dest_geog.Long, dest_geog.Lat,'driving', @BingKey),'.*,(.*)$','$1',1) AS float)
+        tminutes = CAST(Elmer.dbo.rgx_replace(Elmer.dbo.route_mi_min(origin_geog.Long, origin_geog.Lat, dest_geog.Long, dest_geog.Lat,'driving', @GoogleKey),'.*,(.*)$','$1',1) AS float)
         WHERE query_mode = 'walking' AND adj IS NULL AND DATEDIFF(Minute, depart, arrival)/60 < 7;
 
     UPDATE dbo.tmpApiMiMin

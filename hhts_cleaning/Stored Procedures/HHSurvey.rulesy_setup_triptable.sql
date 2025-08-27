@@ -54,7 +54,6 @@ AS BEGIN
                [mode_acc] smallint NULL,
                [mode_egr] smallint NULL,
                [speed_mph] [float] NULL,
-               [day_id] [bigint] NOT NULL,
                [mode_other_specify] [nvarchar](1000) NULL
           );
           COMMIT TRANSACTION;
@@ -103,7 +102,6 @@ AS BEGIN
                ,[mode_acc]
                ,[mode_egr]               
                ,[speed_mph]
-               ,[day_id]
                ,[mode_other_specify]
                               )
           SELECT
@@ -156,7 +154,6 @@ AS BEGIN
                ,cast([mode_acc] as smallint)
                ,cast([mode_egr] as smallint)
                ,CAST(speed_mph AS [float])
-               ,CAST(day_id AS bigint)
                ,CAST(mode_other_specify as nvarchar(1000))
                FROM HouseholdTravelSurvey2025.dbo.ex_trip_unlinked
                ORDER BY tripid;
@@ -166,9 +163,6 @@ AS BEGIN
           ALTER TABLE HHSurvey.Trip --additional destination address fields
                ADD origin_geog    GEOGRAPHY NULL,
                     dest_geog     GEOGRAPHY NULL,
-                    dest_county   varchar(3) NULL,
-                    dest_city     varchar(25) NULL,
-                    dest_zip      varchar(5) NULL,
                     dest_is_home  bit NULL, 
                     dest_is_work  bit NULL,
                     modes         nvarchar(255),
