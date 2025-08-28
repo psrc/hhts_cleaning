@@ -2,16 +2,21 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-
-CREATE PROCEDURE [HHSurvey].[revise_excessive_speed_trips] @GoogleKey nvarchar
+CREATE PROCEDURE [HHSurvey].[revise_excessive_speed_trips] @GoogleKey nvarchar(100)
 AS BEGIN
 
+    IF @GoogleKey IS NULL OR LEN(@GoogleKey) < 10
+    BEGIN
+        RAISERROR('Invalid or missing Google API key', 16, 1);
+        RETURN;
+    END
+
     BEGIN TRANSACTION;
-    DROP TABLE IF EXISTS dbo.tmpApiMiMin;
+    DROP TABLE IF EXISTS HHSurvey.tmpApiMiMin;
     COMMIT TRANSACTION;
 
     BEGIN TRANSACTION;
-    CREATE TABLE [dbo].[tmpApiMiMin](
+    CREATE TABLE [HHSurvey].[tmpApiMiMin](
         tripid decimal(19,0) PRIMARY KEY NOT NULL,
         origin_geog geography NULL,
         dest_geog geography NULL,
@@ -38,58 +43,59 @@ AS BEGIN
     FROM HHSurvey.Trip AS t
             LEFT JOIN HHSurvey.Trip AS prev_t ON t.person_id = prev_t.person_id AND t.tripnum -1 = prev_t.tripnum
             LEFT JOIN HHSurvey.Trip AS next_t ON t.person_id = next_t.person_id AND t.tripnum +1 = next_t.tripnum
-            JOIN dbo.bing_response AS br ON t.tripid=br.tripid 
-        WHERE (EXISTS (SELECT 1 FROM HHSurvey.walkmodes WHERE walkmodes.mode_id = t.mode_1) AND t.speed_mph > 20)
+        WHERE ((EXISTS (SELECT 1 FROM HHSurvey.walkmodes WHERE walkmodes.mode_id = t.mode_1) AND t.speed_mph > 20)
             OR (EXISTS (SELECT 1 FROM HHSurvey.automodes WHERE automodes.mode_id = t.mode_1) AND t.speed_mph > 85)	
             OR (EXISTS (SELECT 1 FROM HHSurvey.transitmodes WHERE transitmodes.mode_id = t.mode_1) AND t.mode_1 <> 31 AND t.speed_mph > 60)	
             OR (t.speed_mph > 600 AND (t.origin_lng between -140 AND -116.95) AND (t.dest_lng between -140 AND -116.95))    -- qualifies for 'excessive speed' flag
             OR t.depart_time_timestamp=t.arrival_time_timestamp                                                             -- instantaneous
             OR DATEDIFF(Minute,  t.depart_time_timestamp,  t.arrival_time_timestamp) > 180 AND  t.speed_mph < 20	        -- qualifies for 'too slow' flag
-            )
-    INSERT INTO dbo.tmpApiMiMin(tripid, origin_geog, dest_geog, distance_miles, revision_code, prev_arrival, depart, arrival, next_depart, query_mode)
+            ) AND NOT (t.origin_lat = t.dest_lat AND t.origin_lng = t.dest_lng))                                            -- exclude zero-distance trips
+    INSERT INTO HHSurvey.tmpApiMiMin(tripid, origin_geog, dest_geog, distance_miles, revision_code, prev_arrival, depart, arrival, next_depart, query_mode)
     SELECT cte.*
     FROM cte
     WHERE cte.origin_geog.Lat BETWEEN 45 AND 50
         AND cte.origin_geog.Long BETWEEN -126 AND -117 
         AND cte.dest_geog.Lat BETWEEN 45 AND 50
         AND cte.dest_geog.Long BETWEEN -126 AND -117 
-        AND NOT EXISTS (SELECT 1 FROM dbo.tmpApiMiMin AS tam WHERE tam.tripid=cte.tripid);
+        AND NOT EXISTS (SELECT 1 FROM HHSurvey.tmpApiMiMin AS tam WHERE tam.tripid=cte.tripid);
     COMMIT TRANSACTION;
 
 --Add a for loop here to keep API call batches small
     DECLARE @i int
-    SET @i = (SELECT count(*) FROM dbo.tmpApiMiMin WHERE api_result ='')
+    SET @i = (SELECT count(*) FROM HHSurvey.tmpApiMiMin WHERE api_result IS NULL)
     WHILE @i > 0
     BEGIN 
         BEGIN TRANSACTION;
         UPDATE TOP (5) [m]
         SET m.api_result=Elmer.dbo.route_mi_min(m.origin_geog.Long, m.origin_geog.Lat, m.dest_geog.Long, m.dest_geog.Lat, m.query_mode, @GoogleKey)
-        FROM dbo.tmpApiMiMin AS m
+        FROM HHSurvey.tmpApiMiMin AS m
         WHERE m.api_result IS NULL AND m.origin_geog IS NOT NULL AND m.dest_geog IS NOT NULL AND m.query_mode IS NOT NULL;
 
-        SET @i = (SELECT count(*) FROM dbo.tmpApiMiMin WHERE api_result ='')
+        WAITFOR DELAY '00:00:01';  -- 1 second delay between batches
+
+        SET @i = (SELECT count(*) FROM HHSurvey.tmpApiMiMin WHERE api_result IS NULL)
         COMMIT TRANSACTION;
     END
 
-    UPDATE dbo.tmpApiMiMin SET tmiles = CAST(Elmer.dbo.rgx_replace(api_result,'^(.*),.*','$1',1) AS float), 
+    UPDATE HHSurvey.tmpApiMiMin SET tmiles = CAST(Elmer.dbo.rgx_replace(api_result,'^(.*),.*','$1',1) AS float), 
                             tminutes = CAST(Elmer.dbo.rgx_replace(api_result,'.*,(.*)$','$1',1) AS float)
-    WHERE api_result IS NOT NULL;
+    WHERE api_result IS NOT NULL AND api_result LIKE '%,%' AND LEN(api_result) > 2;
 
-    UPDATE dbo.tmpApiMiMin
+    UPDATE HHSurvey.tmpApiMiMin
         SET distance_miles = tmiles, adj = 1,
         depart  = DATEADD(Second, round(-60 * tminutes, 0), arrival)
         WHERE (DATEDIFF(Second, prev_arrival, arrival)/60.0 -1 > tminutes OR prev_arrival IS NULL) AND adj IS NULL		  --fits the window to adjust departure only	
             AND (query_mode <> 'walking' 
             OR DATEDIFF(Day, DATEADD(Hour, 3, DATEADD(Second, round(-60 * tminutes, 0), arrival)), arrival) = 0); 		  --walk doesn't cross 3am boundary	
 
-    UPDATE dbo.tmpApiMiMin
+    UPDATE HHSurvey.tmpApiMiMin
         SET distance_miles = tmiles, adj = 1,
         arrival  = DATEADD(Second, round(60 * tminutes, 0), depart)
         WHERE (DATEDIFF(Second, next_depart, depart)/60.0 -1 > tminutes OR next_depart IS NULL) AND adj IS NULL		  --fits the window to adjust arrival only	
             AND (query_mode <> 'walking' 
             OR DATEDIFF(Day, DATEADD(Hour, 3, DATEADD(Second, round(60 * tminutes, 0), depart)), depart) = 0); 		  --walk doesn't cross 3am boundary	
 
-    UPDATE dbo.tmpApiMiMin
+    UPDATE HHSurvey.tmpApiMiMin
         SET distance_miles = tmiles, adj = 2,
         depart  = DATEADD(Second, (DATEDIFF(Second, prev_arrival, next_depart)/2 - tminutes * 30), prev_arrival), 
         arrival =  DATEADD(Second, (DATEDIFF(Second, prev_arrival, next_depart)/2 + tminutes * 30), prev_arrival) 
@@ -99,12 +105,12 @@ AS BEGIN
                 DATEADD(Second, (DATEDIFF(Second, prev_arrival, next_depart)/2 - tminutes * 30), prev_arrival)), 
                 DATEADD(Second, (DATEDIFF(Second, prev_arrival, next_depart)/2 + tminutes * 30), prev_arrival)) = 0);     --walk doesn't cross 3am boundary	
     
-    UPDATE dbo.tmpApiMiMin
+    UPDATE HHSurvey.tmpApiMiMin
         SET adj = -1, revision_code = CONCAT(revision_code, '13,'), 											          --where walk doesn't fit, try driving
         tminutes = CAST(Elmer.dbo.rgx_replace(Elmer.dbo.route_mi_min(origin_geog.Long, origin_geog.Lat, dest_geog.Long, dest_geog.Lat,'driving', @GoogleKey),'.*,(.*)$','$1',1) AS float)
         WHERE query_mode = 'walking' AND adj IS NULL AND DATEDIFF(Minute, depart, arrival)/60 < 7;
 
-    UPDATE dbo.tmpApiMiMin
+    UPDATE HHSurvey.tmpApiMiMin
         SET adj = 3
         WHERE adj = -1 																		   	                	 	   --only potential mode recodes
             AND ABS(DATEDIFF(Second, depart, arrival)/60 - tminutes) < 5; 												   --drive matches reported time 
@@ -114,8 +120,8 @@ AS BEGIN
             t.revision_code = amm.revision_code, 
             t.depart_time_timestamp = amm.depart, 
             t.arrival_time_timestamp = amm.arrival,
-            t.mode_1 = CASE WHEN amm.adj = 3 THEN 16 ELSE t.mode_1 END
-        FROM HHSurvey.Trip AS t JOIN dbo.tmpApiMiMin AS amm ON t.tripid = amm.tripid
+            t.mode_1 = CASE WHEN amm.adj = 3 THEN 100 ELSE t.mode_1 END
+        FROM HHSurvey.Trip AS t JOIN HHSurvey.tmpApiMiMin AS amm ON t.tripid = amm.tripid
         WHERE amm.adj > 0;
 
     DROP TABLE HHSurvey.tmpApiMiMin;																					  --clean up
