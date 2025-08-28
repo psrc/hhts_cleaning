@@ -22,9 +22,11 @@ AS BEGIN
     WHILE @i > 0
     BEGIN 
         BEGIN TRANSACTION;
-        UPDATE TOP (10) dbo.api_purpose  -- Divide into smaller queries to avoid API limits
+        UPDATE TOP (25) dbo.api_purpose  -- Batch to avoid API limits
         SET loc_result = Elmer.dbo.loc_recognize(dest_lng, dest_lat, @GoogleKey)
         WHERE loc_result ='';
+
+        WAITFOR DELAY '00:00:02'; 
 
         SET @i = (SELECT count(*) FROM dbo.api_purpose WHERE loc_result ='')
         COMMIT TRANSACTION;
