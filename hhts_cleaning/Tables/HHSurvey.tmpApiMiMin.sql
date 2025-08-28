@@ -1,4 +1,4 @@
-CREATE TABLE [dbo].[tmpApiMiMin]
+CREATE TABLE [HHSurvey].[tmpApiMiMin]
 (
 [tripid] [decimal] (19, 0) NOT NULL,
 [origin_geog] [sys].[geography] NULL,
@@ -16,5 +16,5 @@ CREATE TABLE [dbo].[tmpApiMiMin]
 [adj] [int] NULL
 ) ON [PRIMARY]
 GO
-ALTER TABLE [dbo].[tmpApiMiMin] ADD CONSTRAINT [PK__tmpApiMi__303DBBBDCE121119] PRIMARY KEY CLUSTERED ([tripid]) ON [PRIMARY]
+ALTER TABLE [HHSurvey].[tmpApiMiMin] ADD CONSTRAINT [PK__tmpApiMi__303DBBBD36F07731] PRIMARY KEY CLUSTERED ([tripid]) ON [PRIMARY]
 GO

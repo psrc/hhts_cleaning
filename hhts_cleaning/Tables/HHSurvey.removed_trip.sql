@@ -1,6 +1,6 @@
 CREATE TABLE [HHSurvey].[removed_trip]
 (
-[recid] [int] NOT NULL,
+[recid] [decimal] (19, 0) NOT NULL,
 [hhid] [decimal] (19, 0) NOT NULL,
 [person_id] [decimal] (19, 0) NOT NULL,
 [pernum] [int] NULL,
@@ -35,27 +35,25 @@ CREATE TABLE [HHSurvey].[removed_trip]
 [origin_purpose] [int] NULL,
 [dest_purpose] [int] NULL,
 [dest_purpose_other] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[mode_1] [smallint] NOT NULL,
-[mode_2] [smallint] NULL,
-[mode_3] [smallint] NULL,
-[mode_4] [smallint] NULL,
+[mode_1] [int] NULL,
+[mode_2] [int] NULL,
+[mode_3] [int] NULL,
+[mode_4] [int] NULL,
 [driver] [smallint] NULL,
 [mode_acc] [smallint] NULL,
 [mode_egr] [smallint] NULL,
 [speed_mph] [float] NULL,
-[day_id] [bigint] NOT NULL,
 [mode_other_specify] [nvarchar] (1000) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [origin_geog] [sys].[geography] NULL,
 [dest_geog] [sys].[geography] NULL,
-[dest_county] [varchar] (3) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[dest_city] [varchar] (25) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[dest_zip] [varchar] (5) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [dest_is_home] [bit] NULL,
 [dest_is_work] [bit] NULL,
 [modes] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [psrc_inserted] [bit] NULL,
 [revision_code] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [psrc_resolved] [smallint] NULL,
-[psrc_comment] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL
+[psrc_comment] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[valid_from] [datetime2] NOT NULL,
+[valid_to] [datetime2] NOT NULL
 ) ON [PRIMARY]
 GO

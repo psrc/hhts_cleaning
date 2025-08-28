@@ -2,18 +2,18 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-	CREATE VIEW [HHSurvey].[data2fixie] WITH SCHEMABINDING  
+CREATE VIEW [HHSurvey].[data2fixie] WITH SCHEMABINDING  
 	AS
 	SELECT 
         t1.recid, 
         t1.person_id,
+        t1.daynum,	
+        t1.tripnum, 
         STUFF((SELECT ',' + tef.error_flag
                 FROM HHSurvey.trip_error_flags AS tef
                 WHERE tef.recid = t1.recid
                 ORDER BY tef.error_flag DESC
                 FOR XML PATH('')), 1, 1, NULL) AS Error,
-        t1.daynum,	
-        t1.tripnum, 
         STUFF((SELECT DISTINCT ',' + mode_desc
                 FROM (
                     SELECT ma.mode_desc UNION ALL
