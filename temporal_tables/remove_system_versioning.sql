@@ -47,3 +47,12 @@ go
     DROP PERIOD FOR SYSTEM_TIME;
 
     DROP TABLE History.HHSurvey__Vehicle;
+
+-- trip_error_flags 
+    ALTER TABLE HHSurvey.trip_error_flags 
+    set (system_versioning = OFF);
+
+    ALTER TABLE HHSurvey.trip_error_flags 
+    DROP PERIOD FOR SYSTEM_TIME;
+
+    DROP TABLE History.HHSurvey__trip_error_flags;
