@@ -1,6 +1,6 @@
-CREATE TABLE [HHSurvey].[Day]
+CREATE TABLE [History].[HHSurvey__Day]
 (
-[day_id] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[day_id] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
 [daynum] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [hhid] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [num_complete_trip_surveys] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
@@ -33,6 +33,56 @@ CREATE TABLE [HHSurvey].[Day]
 [telework_time] [int] NULL,
 [travel_day] [int] NULL,
 [travel_dow] [int] NULL,
-[no_travel] [int] NULL
+[no_travel] [int] NULL,
+[valid_from] [datetime2] NOT NULL,
+[valid_to] [datetime2] NOT NULL
 ) ON [PRIMARY]
+GO
+CREATE CLUSTERED INDEX [ix_HHSurvey__Day] ON [History].[HHSurvey__Day] ([valid_to], [valid_from]) ON [PRIMARY]
+GO
+CREATE TABLE [HHSurvey].[Day]
+(
+[day_id] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+[daynum] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[hhid] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[num_complete_trip_surveys] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[num_trips] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[pernum] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[person_id] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[survey_year] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[travel_date] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[attend_school_1] [int] NULL,
+[attend_school_2] [int] NULL,
+[attend_school_3] [int] NULL,
+[attend_school_998] [int] NULL,
+[attend_school_999] [int] NULL,
+[day_iscomplete] [int] NULL,
+[deliver_elsewhere] [int] NULL,
+[deliver_food] [int] NULL,
+[deliver_grocery] [int] NULL,
+[deliver_none] [int] NULL,
+[deliver_office] [int] NULL,
+[deliver_other] [int] NULL,
+[deliver_package] [int] NULL,
+[deliver_work] [int] NULL,
+[hh_day_iscomplete] [int] NULL,
+[is_participant] [int] NULL,
+[loc_end] [int] NULL,
+[loc_start] [int] NULL,
+[proxy_complete] [int] NULL,
+[summary_complete] [int] NULL,
+[surveyable] [int] NULL,
+[telework_time] [int] NULL,
+[travel_day] [int] NULL,
+[travel_dow] [int] NULL,
+[no_travel] [int] NULL,
+[valid_from] [datetime2] GENERATED ALWAYS AS ROW START NOT NULL CONSTRAINT [HHSurvey_Day_valid_from_default] DEFAULT (sysutcdatetime()),
+[valid_to] [datetime2] GENERATED ALWAYS AS ROW END NOT NULL CONSTRAINT [HHSurvey_Day_valid_to_default] DEFAULT ('9999-12-31 23:59:59.9999999'),
+PERIOD FOR SYSTEM_TIME (valid_from, valid_to),
+CONSTRAINT [HHSurvey_Day_PK] PRIMARY KEY CLUSTERED ([day_id]) ON [PRIMARY]
+) ON [PRIMARY]
+WITH
+(
+SYSTEM_VERSIONING = ON (HISTORY_TABLE = [History].[HHSurvey__Day])
+)
 GO

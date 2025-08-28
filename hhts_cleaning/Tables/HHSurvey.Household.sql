@@ -1,3 +1,84 @@
+CREATE TABLE [History].[HHSurvey__Household]
+(
+[diary_platform] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[hhid] [decimal] (19, 0) NOT NULL,
+[num_complete_thu] [int] NULL,
+[num_complete_tue] [int] NULL,
+[num_days_complete_weekday] [int] NULL,
+[num_days_complete_weekend] [int] NULL,
+[num_participants] [int] NULL,
+[num_trips] [int] NULL,
+[numdayscomplete] [int] NULL,
+[prev_home_lat] [float] NULL,
+[prev_home_lng] [float] NULL,
+[prev_home_notwa_zip] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[prev_res_factors_specify] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[reported_lat] [float] NULL,
+[reported_lng] [float] NULL,
+[sample_lat] [float] NULL,
+[sample_lng] [float] NULL,
+[signup_platform] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[survey_year] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[traveldate_end] [date] NULL,
+[traveldate_start] [date] NULL,
+[home_state] [int] NULL,
+[home_county] [int] NULL,
+[home_bg_2010] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[home_bg_2020] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[home_puma_2012] [int] NULL,
+[home_puma_2022] [int] NULL,
+[sample_home_bg] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+[hh_is_complete] [int] NULL,
+[hhgroup] [int] NULL,
+[hhincome_broad] [int] NULL,
+[hhincome_detailed] [int] NULL,
+[hhincome_followup] [int] NULL,
+[hhsize] [int] NULL,
+[home_in_region] [int] NULL,
+[num_students] [int] NULL,
+[num_surveyable] [int] NULL,
+[numadults] [int] NULL,
+[numchildren] [int] NULL,
+[numworkers] [int] NULL,
+[prev_home_notwa_state] [int] NULL,
+[prev_home_wa] [int] NULL,
+[prev_rent_own] [int] NULL,
+[prev_res_factors_amenities] [int] NULL,
+[prev_res_factors_community_change] [int] NULL,
+[prev_res_factors_crime] [int] NULL,
+[prev_res_factors_employment] [int] NULL,
+[prev_res_factors_forced] [int] NULL,
+[prev_res_factors_hh_size] [int] NULL,
+[prev_res_factors_housing_cost] [int] NULL,
+[prev_res_factors_income_change] [int] NULL,
+[prev_res_factors_less_space] [int] NULL,
+[prev_res_factors_more_space] [int] NULL,
+[prev_res_factors_no_answer] [int] NULL,
+[prev_res_factors_other] [int] NULL,
+[prev_res_factors_quality] [int] NULL,
+[prev_res_factors_school] [int] NULL,
+[prev_res_factors_telework] [int] NULL,
+[prev_res_type] [int] NULL,
+[rent_own] [int] NULL,
+[res_dur] [int] NULL,
+[res_type] [int] NULL,
+[sample_segment] [int] NULL,
+[vehicle_count] [int] NULL,
+[num_complete_fri] [int] NULL,
+[num_complete_mon] [int] NULL,
+[num_complete_sat] [int] NULL,
+[num_complete_sun] [int] NULL,
+[num_complete_wed] [int] NULL,
+[home_geog] [sys].[geography] NULL,
+[home_lat] [float] NULL,
+[home_lng] [float] NULL,
+[sample_geog] [sys].[geography] NULL,
+[valid_from] [datetime2] NOT NULL,
+[valid_to] [datetime2] NOT NULL
+) ON [PRIMARY]
+GO
+CREATE CLUSTERED INDEX [ix_HHSurvey__Household] ON [History].[HHSurvey__Household] ([valid_to], [valid_from]) ON [PRIMARY]
+GO
 CREATE TABLE [HHSurvey].[Household]
 (
 [diary_platform] [varchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
@@ -72,10 +153,16 @@ CREATE TABLE [HHSurvey].[Household]
 [home_geog] [sys].[geography] NULL,
 [home_lat] [float] NULL,
 [home_lng] [float] NULL,
-[sample_geog] [sys].[geography] NULL
+[sample_geog] [sys].[geography] NULL,
+[valid_from] [datetime2] GENERATED ALWAYS AS ROW START NOT NULL CONSTRAINT [HHSurvey_Household_valid_from_default] DEFAULT (sysutcdatetime()),
+[valid_to] [datetime2] GENERATED ALWAYS AS ROW END NOT NULL CONSTRAINT [HHSurvey_Household_valid_to_default] DEFAULT ('9999-12-31 23:59:59.9999999'),
+PERIOD FOR SYSTEM_TIME (valid_from, valid_to),
+CONSTRAINT [PK_hhid] PRIMARY KEY CLUSTERED ([hhid]) WITH (FILLFACTOR=80) ON [PRIMARY]
 ) ON [PRIMARY]
-GO
-ALTER TABLE [HHSurvey].[Household] ADD CONSTRAINT [PK_hhid] PRIMARY KEY CLUSTERED ([hhid]) WITH (FILLFACTOR=80) ON [PRIMARY]
+WITH
+(
+SYSTEM_VERSIONING = ON (HISTORY_TABLE = [History].[HHSurvey__Household])
+)
 GO
 CREATE SPATIAL INDEX [home_geog_idx] ON [HHSurvey].[Household] ([home_geog]) WITH (CELLS_PER_OBJECT = 12) ON [PRIMARY]
 GO
