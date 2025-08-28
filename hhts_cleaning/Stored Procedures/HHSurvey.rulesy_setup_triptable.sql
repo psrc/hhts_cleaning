@@ -155,7 +155,7 @@ AS BEGIN
                ,cast([mode_egr] as smallint)
                ,CAST(speed_mph AS [float])
                ,CAST(mode_other_specify as nvarchar(1000))
-               FROM HouseholdTravelSurvey2025.dbo.ex_trip_unlinked
+               FROM HouseholdTravelSurvey2025.dbo.ex_trip_unlinked WHERE transit_quality_flag NOT IN('SA','SE')
                ORDER BY tripid;
           COMMIT TRANSACTION;
 
