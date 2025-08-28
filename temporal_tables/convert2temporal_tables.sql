@@ -11,9 +11,11 @@ go
         valid_from datetime2 generated always as row start HIDDEN 
         constraint HHSurvey_Household_valid_from_default default sysutcdatetime(),
         valid_to datetime2 generated always as row end HIDDEN
-        constraint HHSurvey_Household_valid_to_default default '9999-12-31 23:59:59.9999999',
-        period for SYSTEM_TIME (valid_from, valid_to)
+        constraint HHSurvey_Household_valid_to_default default '9999-12-31 23:59:59.9999999'
     go
+
+    alter table HHSurvey.Household add
+        period for SYSTEM_TIME (valid_from, valid_to)
 
     alter table HHSurvey.Household
         set (system_versioning = on (history_table = History.HHSurvey__Household));
@@ -23,9 +25,11 @@ go
         valid_from datetime2 generated always as row start HIDDEN 
         constraint HHSurvey_Person_valid_from_default default sysutcdatetime(),
         valid_to datetime2 generated always as row end HIDDEN
-        constraint HHSurvey_Person_valid_to_default default '9999-12-31 23:59:59.9999999',
-        period for SYSTEM_TIME (valid_from, valid_to)
+        constraint HHSurvey_Person_valid_to_default default '9999-12-31 23:59:59.9999999'
     go
+
+    alter table HHSurvey.Person add
+        period for SYSTEM_TIME (valid_from, valid_to)
 
     alter table HHSurvey.Person
         set (system_versioning = on (history_table = History.HHSurvey__Person));
@@ -36,9 +40,11 @@ go
         valid_from datetime2 generated always as row start HIDDEN 
         constraint HHSurvey_Trip_valid_from_default default sysutcdatetime(),
         valid_to datetime2 generated always as row end HIDDEN
-        constraint HHSurvey_Trip_valid_to_default default '9999-12-31 23:59:59.9999999',
-        period for SYSTEM_TIME (valid_from, valid_to)
+        constraint HHSurvey_Trip_valid_to_default default '9999-12-31 23:59:59.9999999'
     go
+
+    alter table HHSurvey.Trip add
+        period for SYSTEM_TIME (valid_from, valid_to)
 
     alter table HHSurvey.Trip
         set (system_versioning = on (history_table = History.HHSurvey__Trip));
@@ -54,9 +60,11 @@ go
         valid_from datetime2 generated always as row start HIDDEN 
         constraint HHSurvey_Vehicle_valid_from_default default sysutcdatetime(),
         valid_to datetime2 generated always as row end HIDDEN
-        constraint HHSurvey_Vehicle_valid_to_default default '9999-12-31 23:59:59.9999999',
-        period for SYSTEM_TIME (valid_from, valid_to)
+        constraint HHSurvey_Vehicle_valid_to_default default '9999-12-31 23:59:59.9999999'
     go
+
+    alter table HHSurvey.Vehicle add
+        period for SYSTEM_TIME (valid_from, valid_to)
 
     alter table HHSurvey.Vehicle
         set (system_versioning = on (history_table = History.HHSurvey__Vehicle));
@@ -73,9 +81,11 @@ go
         valid_from datetime2 generated always as row start HIDDEN 
         constraint HHSurvey_Day_valid_from_default default sysutcdatetime(),
         valid_to datetime2 generated always as row end HIDDEN
-        constraint HHSurvey_Day_valid_to_default default '9999-12-31 23:59:59.9999999',
-        period for SYSTEM_TIME (valid_from, valid_to)
+        constraint HHSurvey_Day_valid_to_default default '9999-12-31 23:59:59.9999999'
     go
+
+    alter table HHSurvey.Day add
+        period for SYSTEM_TIME (valid_from, valid_to)
 
     alter table HHSurvey.Day
         set (system_versioning = on (history_table = History.HHSurvey__Day));
@@ -86,9 +96,11 @@ go
         valid_from datetime2 generated always as row start HIDDEN 
         constraint HHSurvey_trip_error_flags_valid_from_default default sysutcdatetime(),
         valid_to datetime2 generated always as row end HIDDEN
-        constraint HHSurvey_trip_error_flags_valid_to_default default '9999-12-31 23:59:59.9999999',
-        period for SYSTEM_TIME (valid_from, valid_to)
+        constraint HHSurvey_trip_error_flags_valid_to_default default '9999-12-31 23:59:59.9999999'
     go
+
+    alter table HHSurvey.trip_error_flags add
+        period for SYSTEM_TIME (valid_from, valid_to)
 
     alter table HHSurvey.trip_error_flags
         set (system_versioning = on (history_table = History.HHSurvey__trip_error_flags));
