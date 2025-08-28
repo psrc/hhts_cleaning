@@ -46,13 +46,13 @@ AS BEGIN
                [origin_purpose] [int] NULL,
                [dest_purpose] [int] NULL,
                [dest_purpose_other] nvarchar(255) null,
-               [mode_1] smallint NOT NULL,
-               [mode_2] smallint NULL,
-               [mode_3] smallint NULL,
-               [mode_4] smallint NULL,
-               [driver] smallint NULL,                            
-               [mode_acc] smallint NULL,
-               [mode_egr] smallint NULL,
+               [mode_1] int NOT NULL,
+               [mode_2] int NULL,
+               [mode_3] int NULL,
+               [mode_4] int NULL,
+               [driver] int NULL,                            
+               [mode_acc] int NULL,
+               [mode_egr] int NULL,
                [speed_mph] [float] NULL,
                [mode_other_specify] [nvarchar](1000) NULL
           );
@@ -146,13 +146,13 @@ AS BEGIN
                ,CAST(origin_purpose AS [int])
                ,CAST(dest_purpose AS [int])
                ,CAST(dest_purpose_other AS nvarchar(255))
-               ,cast([mode_1] as smallint)
-               ,cast([mode_2] as smallint)
-               ,cast([mode_3] as smallint)
-               ,cast([mode_4] as smallint)
-               ,cast([driver] as smallint) 
-               ,cast([mode_acc] as smallint)
-               ,cast([mode_egr] as smallint)
+               ,cast([mode_1] as int)
+               ,cast([mode_2] as int)
+               ,cast([mode_3] as int)
+               ,cast([mode_4] as int)
+               ,cast([driver] as int) 
+               ,cast([mode_acc] as int)
+               ,cast([mode_egr] as int)
                ,CAST(speed_mph AS [float])
                ,CAST(mode_other_specify as nvarchar(1000))
                FROM HouseholdTravelSurvey2025.dbo.ex_trip_unlinked WHERE transit_quality_flag NOT IN('SA','SE')
@@ -168,7 +168,7 @@ AS BEGIN
                     modes         nvarchar(255),
                     psrc_inserted bit NULL,
                     revision_code nvarchar(255) NULL,
-                    psrc_resolved smallint NULL,
+                    psrc_resolved int NULL,
                     psrc_comment  nvarchar(255) NULL;
 
           ALTER TABLE HHSurvey.household ADD home_geog   GEOGRAPHY NULL,
