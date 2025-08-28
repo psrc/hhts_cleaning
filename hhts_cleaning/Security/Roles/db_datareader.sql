@@ -14,5 +14,3 @@ ALTER ROLE [db_datareader] ADD MEMBER [PSRC\Modeller]
 GO
 ALTER ROLE [db_datareader] ADD MEMBER [PSRC\MRichards]
 GO
-ALTER ROLE [db_datareader] ADD MEMBER [PSRC\SChildress]
-GO
