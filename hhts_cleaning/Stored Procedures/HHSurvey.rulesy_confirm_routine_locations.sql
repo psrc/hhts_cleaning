@@ -2,7 +2,6 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-
 CREATE PROCEDURE [HHSurvey].[rulesy_confirm_routine_locations]
 AS BEGIN
 
@@ -44,6 +43,12 @@ AS BEGIN
         FROM HHSurvey.Household AS h JOIN #central_home_tripend AS te ON h.hhid = te.hhid JOIN HHSurvey.Trip AS t ON t.recid = te.recid
         WHERE h.home_geog IS NULL;
 
+    UPDATE h 
+        SET h.home_lat = h.home_geog.Lat, 
+            h.home_lng = h.home_geog.Long
+        FROM HHSurvey.Household AS h 
+        WHERE h.home_lat IS NULL;
+
     DROP TABLE IF EXISTS #central_home_tripend;
     COMMIT TRANSACTION;
 
@@ -68,7 +73,13 @@ AS BEGIN
             p.work_lng = t.dest_lng 
         FROM HHSurvey.Person AS p JOIN #central_work_tripend AS te ON p.person_id = te.person_id JOIN HHSurvey.Trip AS t ON t.recid = te.recid 
         WHERE p.work_geog IS NULL AND (p.employment < 7 OR t.dest_purpose IN(SELECT flag_value FROM HHSurvey.NullFlags));
-    
+
+    UPDATE p
+        SET p.work_lat = p.work_geog.Lat, 
+            p.work_lng = p.work_geog.Long
+        FROM HHSurvey.Person AS p 
+        WHERE p.work_lat IS NULL;
+
     DROP TABLE IF EXISTS #central_work_tripend;
     COMMIT TRANSACTION;
 
@@ -93,6 +104,12 @@ AS BEGIN
             p.school_loc_lng = t.dest_lng 
         FROM HHSurvey.Person AS p JOIN #central_school_tripend AS te ON p.person_id = te.person_id JOIN HHSurvey.Trip AS t ON t.recid = te.recid
         WHERE p.school_geog IS NULL AND (p.student IN(2,3) OR t.dest_purpose IN(SELECT flag_value FROM HHSurvey.NullFlags));
+
+    UPDATE p
+        SET p.school_loc_lat = p.school_geog.Lat, 
+            p.school_loc_lng = p.school_geog.Long
+        FROM HHSurvey.Person AS p 
+        WHERE p.school_loc_lat IS NULL;
 
     DROP TABLE IF EXISTS #central_school_tripend;
     COMMIT TRANSACTION;
