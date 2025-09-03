@@ -2,81 +2,11 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE PROCEDURE [HHSurvey].[link_trips]
+CREATE   PROCEDURE [HHSurvey].[link_trips]
     @trip_ingredients HHSurvey.TripIngredientType READONLY
 AS
 BEGIN
-    -- Clean up any existing temp table from previous runs
-    IF OBJECT_ID('tempdb..#trip_ingredient') IS NOT NULL
-        DROP TABLE #trip_ingredient;
-    
-    -- Create temp table with explicit structure
-    CREATE TABLE #trip_ingredient (
-        [recid] decimal(19,0) NOT NULL,
-        [hhid] decimal(19,0) NOT NULL,
-        [person_id] decimal(19,0) NOT NULL,
-        [pernum] [int] NULL,
-        [tripid] decimal(19,0) NULL,
-        [tripnum] [int] NOT NULL,
-        [traveldate] datetime2 NULL,
-        [daynum] [int] NULL,
-        [depart_time_timestamp] datetime2 NULL,
-        [arrival_time_timestamp] datetime2 NULL,
-        [origin_lat] [float] NULL,
-        [origin_lng] [float] NULL,
-        [dest_lat] [float] NULL,
-        [dest_lng] [float] NULL,
-        [distance_miles] [float] NULL,
-        [travel_time] float NULL,
-        [hhmember1] decimal(19,0) NULL,
-        [hhmember2] decimal(19,0) NULL,
-        [hhmember3] decimal(19,0) NULL,
-        [hhmember4] decimal(19,0) NULL,
-        [hhmember5] decimal(19,0) NULL,
-        [hhmember6] decimal(19,0) NULL,
-        [hhmember7] decimal(19,0) NULL,
-        [hhmember8] decimal(19,0) NULL,
-        [hhmember9] decimal(19,0) NULL,
-        [hhmember10] decimal(19,0) NULL,
-        [hhmember11] decimal(19,0) NULL,
-        [hhmember12] decimal(19,0) NULL,
-        [hhmember13] decimal(19,0) NULL,
-        [travelers_hh] [int] NULL,
-        [travelers_nonhh] [int] NULL,
-        [travelers_total] [int] NULL,
-        [origin_purpose] [int] NULL,
-        [dest_purpose] [int] NULL,
-        [dest_purpose_other] nvarchar(255) NULL,
-        [mode_1] int NULL,
-        [mode_2] int NULL,
-        [mode_3] int NULL,
-        [mode_4] int NULL,
-        [driver] int NULL,
-        [mode_acc] int NULL,
-        [mode_egr] int NULL,
-        [speed_mph] [float] NULL,
-        [mode_other_specify] nvarchar(1000) NULL,
-        [origin_geog] GEOGRAPHY NULL,
-        [dest_geog] GEOGRAPHY NULL,
-        [dest_is_home] bit NULL,
-        [dest_is_work] bit NULL,
-        [modes] nvarchar(255) NULL,
-        [psrc_inserted] bit NULL,
-        [revision_code] nvarchar(255) NULL,
-        [psrc_resolved] int NULL,
-        [psrc_comment] nvarchar(255) NULL,
-        [trip_link] int NOT NULL
-    );
-    
-    -- If parameter provided, use it; otherwise read from named table
-    IF EXISTS (SELECT 1 FROM @trip_ingredients)
-    BEGIN
-        INSERT INTO #trip_ingredient SELECT * FROM @trip_ingredients;
-    END
-    ELSE
-    BEGIN
-        INSERT INTO #trip_ingredient SELECT * FROM HHSurvey.trip_ingredient;
-    END
+    SELECT * INTO #trip_ingredient FROM @trip_ingredients;
 
     -- meld the trip ingredients to create the fields that will populate the linked trip, and saves those as a separate table, 'linked_trip'.
     BEGIN TRANSACTION;
@@ -209,70 +139,7 @@ BEGIN
 
     EXECUTE HHSurvey.tripnum_update; 
             
-/*    UPDATE HHSurvey.Trip SET mode_acc = NULL, mode_egr = NULL   -- Clears what was stored as access or egress; those values are still part of the chain captured in the concatenated 'modes' field.
-        WHERE EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE lt.person_id =trip.person_id AND lt.trip_link = trip.tripnum)
-        ;
-
-    -- Characterize access and egress trips, separately for 1) transit trips and 2) auto trips.  (Bike/Ped trips have no access/egress)
-    -- [Unions must be used here; otherwise the VALUE set from the dbo.Rgx table object gets reused across cte fields.]
-
-    -- Create rgx expressions for access/egress modes
-    	DECLARE @auto_access_egress_modes nvarchar;
-		WITH cte AS (SELECT mode_id FROM HHSurvey.walkmodes
-		   UNION ALL SELECT mode_id FROM HHSurvey.bikemodes)
-		SELECT @auto_access_egress_modes =  STUFF(Elmer.dbo.TRIM('||' + CAST(mode_id AS nchar)), 1, 1, NULL) 
-							   FROM cte FOR XML PATH('');
-
-		DECLARE @transit_access_egress_modes nvarchar;
-		WITH cte AS (SELECT mode_id FROM HHSurvey.walkmodes
-		   UNION ALL SELECT mode_id FROM HHSurvey.bikemodes
-		   UNION ALL SELECT mode_id FROM HHSurvey.automodes)
-		SELECT @auto_access_egress_modes =  STUFF(Elmer.dbo.TRIM('||' + CAST(mode_id AS nchar)), 1, 1, NULL) 
-							   FROM cte FOR XML PATH('');
-
-    WITH cte_acc_egr1  AS 
-    (	SELECT t1.person_id, t1.tripnum, 'A' AS label, 'transit' AS trip_type,
-            (SELECT MAX(CAST(VALUE AS int)) FROM STRING_SPLIT(Elmer.dbo.rgx_extract(t1.modes,'^((?:' + @transit_access_egress_modes + '),)+',1),',')) AS link_value
-        FROM HHSurvey.Trip AS t1 WHERE EXISTS (SELECT 1 FROM STRING_SPLIT(t1.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.transitmodes)) 
-                            AND Elmer.dbo.rgx_extract(t1.modes,'^(\b(?:' + @transit_access_egress_modes + ')\b,?)+',1) IS NOT NULL
-        UNION ALL 
-        SELECT t2.person_id, t2.tripnum, 'E' AS label, 'transit' AS trip_type,	
-            (SELECT MAX(CAST(VALUE AS int)) FROM STRING_SPLIT(Elmer.dbo.rgx_extract(t2.modes,'(,(?:' + @transit_access_egress_modes + '))+$',1),',')) AS link_value 
-        FROM HHSurvey.Trip AS t2 WHERE EXISTS (SELECT 1 FROM STRING_SPLIT(t2.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.transitmodes))
-                            AND Elmer.dbo.rgx_extract(t2.modes,'^(\b(?:' + @transit_access_egress_modes + ')\b,?)+',1) IS NOT NULL			
-        UNION ALL 
-        SELECT t3.person_id, t3.tripnum, 'A' AS label, 'auto' AS trip_type,
-            (SELECT MAX(CAST(VALUE AS int)) FROM STRING_SPLIT(Elmer.dbo.rgx_extract(t3.modes,'^((?:' + @auto_access_egress_modes + ')\b,?)+',1),',')) AS link_value
-        FROM HHSurvey.Trip AS t3 WHERE EXISTS (SELECT 1 FROM STRING_SPLIT(t3.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.automodes)) 
-                                AND NOT EXISTS (SELECT 1 FROM STRING_SPLIT(t3.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.transitmodes))
-                                AND Elmer.dbo.rgx_replace(t3.modes,'^(\b(?:' + @auto_access_egress_modes + ')\b,?)+','',1) IS NOT NULL
-        UNION ALL 
-        SELECT t4.person_id, t4.tripnum, 'E' AS label, 'auto' AS trip_type,
-            (SELECT MAX(CAST(VALUE AS int)) FROM STRING_SPLIT(Elmer.dbo.rgx_extract(t4.modes,'(,(?:' + @auto_access_egress_modes + '))+$',1),',')) AS link_value
-        FROM HHSurvey.Trip AS t4 WHERE EXISTS (SELECT 1 FROM STRING_SPLIT(t4.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.automodes)) 
-                                AND NOT EXISTS (SELECT 1 FROM STRING_SPLIT(t4.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.transitmodes))
-                                AND Elmer.dbo.rgx_replace(t4.modes,'^(\b(?:' + @auto_access_egress_modes + ')\b,?)+','',1) IS NOT NULL),
-    cte_acc_egr2 AS (SELECT cte.person_id, cte.tripnum, cte.trip_type,
-                            MAX(CASE WHEN cte.label = 'A' THEN cte.link_value ELSE NULL END) AS mode_acc,
-                            MAX(CASE WHEN cte.label = 'E' THEN cte.link_value ELSE NULL END) AS mode_egr
-        FROM cte_acc_egr1 AS cte GROUP BY cte.person_id, cte.tripnum, cte.trip_type)
-    UPDATE t 
-        SET t.mode_acc = cte_acc_egr2.mode_acc,
-            t.mode_egr = cte_acc_egr2.mode_egr
-        FROM HHSurvey.Trip AS t JOIN cte_acc_egr2 ON t.person_id = cte_acc_egr2.person_id AND t.tripnum = cte_acc_egr2.tripnum 
-        WHERE EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE lt.person_id =t.person_id AND lt.trip_link = t.tripnum)
-        ;
-
-    --handle the 'other' category left out of the operation above (it is the largest integer but secondary to listed modes)
-    UPDATE HHSurvey.Trip SET trip.mode_acc = 97 WHERE trip.mode_acc IS NULL AND Elmer.dbo.rgx_find(trip.modes,'^97,\d+',1) = 1
-        AND EXISTS (SELECT 1 FROM STRING_SPLIT(trip.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.automodes UNION select mode_id FROM HHSurvey.transitmodes)) 
-        AND EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE lt.person_id =trip.person_id AND lt.trip_link = trip.tripnum);
-    UPDATE HHSurvey.Trip SET trip.mode_egr = 97 WHERE trip.mode_egr IS NULL AND Elmer.dbo.rgx_find(trip.modes,'\d+,97$',1) = 1
-        AND EXISTS (SELECT 1 FROM STRING_SPLIT(trip.modes,',') WHERE VALUE IN(SELECT mode_id FROM HHSurvey.automodes UNION select mode_id FROM HHSurvey.transitmodes)) 
-        AND EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE lt.person_id =trip.person_id AND lt.trip_link = trip.tripnum)
-        ;	
-*/
-    -- Populate separate mode fields [[No longer removing access/egress from the beginning and end of 1) transit and 2) auto trip strings]]
+    -- Populate separate mode fields
         WITH cte AS 
         (SELECT t.recid, Elmer.dbo.rgx_replace(t.modes, '(?<=\b\1,.*)\b(\w+),?','',1) AS mode_reduced FROM HHSurvey.Trip AS t)
     UPDATE t
@@ -292,8 +159,6 @@ BEGIN
     COMMIT TRANSACTION;
 
     --temp tables should disappear when the spoc ends, but to be tidy we explicitly delete them.
-    DROP TABLE IF EXISTS HHSurvey.trip_ingredient;
-    DROP TABLE IF EXISTS #trip_ingredient;
     DROP TABLE IF EXISTS #linked_trips;
     EXEC HHSurvey.recalculate_after_edit;
 

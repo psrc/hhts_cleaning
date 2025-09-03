@@ -2,22 +2,16 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE PROCEDURE [HHSurvey].[trip_link_prep]
+CREATE   PROCEDURE [HHSurvey].[link_trips_systemically]
 AS BEGIN
+
+    DECLARE @trip_ingredients_input HHSurvey.TripIngredientType;
+
     -- Populate consolidated modes field, used later
     BEGIN TRANSACTION;
     UPDATE HHSurvey.Trip
         SET modes = CONCAT_WS(',', mode_1, mode_2, mode_3, mode_4)
     COMMIT TRANSACTION;
-
-/*    UPDATE HHSurvey.Trip --used before MSSQL2017
-            SET modes = Elmer.dbo.TRIM(Elmer.dbo.rgx_replace(
-                        STUFF(	COALESCE(',' + CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM HHSurvey.NullFlags AS nf WHERE nf.flag_value = trip.mode_1)	  THEN trip.mode_1 	 ELSE NULL END AS nvarchar), '') + 
-                                COALESCE(',' + CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM HHSurvey.NullFlags AS nf WHERE nf.flag_value = trip.mode_2)	  THEN trip.mode_2 	 ELSE NULL END AS nvarchar), '') + 
-                                COALESCE(',' + CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM HHSurvey.NullFlags AS nf WHERE nf.flag_value = trip.mode_3)   THEN trip.mode_3 	 ELSE NULL END AS nvarchar), '') + 
-                                COALESCE(',' + CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM HHSurvey.NullFlags AS nf WHERE nf.flag_value = trip.mode_4)   THEN trip.mode_4 	 ELSE NULL END AS nvarchar), ''), 1, 1, ''),
-                        '(-?\b\d+\b),(?=\b\1\b)','',1));
-    */
 
     BEGIN TRANSACTION;
     -- impute mode for vehicular tour components
@@ -75,12 +69,65 @@ AS BEGIN
     union all -- This union is done simply for the side effect of preventing the recid in the new table to be defined as an IDENTITY column.
     SELECT TOP 0 HHSurvey.Trip.*, CAST(0 AS int) AS trip_link 
         FROM HHSurvey.Trip
-    
-    --select the trip ingredients that will be linked; this selects all but the first component 
-    DROP TABLE IF EXISTS HHSurvey.trip_ingredient;
     COMMIT TRANSACTION;
+
+    --select the trip ingredients that will be linked; this selects all but the first component 
     BEGIN TRANSACTION;
-    SELECT next_trip.*, CAST(0 AS int) AS trip_link INTO HHSurvey.trip_ingredient
+    INSERT INTO @trip_ingredients_input
+    SELECT [next_trip].[recid]
+      ,[next_trip].[hhid]
+      ,[next_trip].[person_id]
+      ,[next_trip].[pernum]
+      ,[next_trip].[tripid]
+      ,[next_trip].[tripnum]
+      ,[next_trip].[traveldate]
+      ,[next_trip].[daynum]
+      ,[next_trip].[depart_time_timestamp]
+      ,[next_trip].[arrival_time_timestamp]
+      ,[next_trip].[origin_lat]
+      ,[next_trip].[origin_lng]
+      ,[next_trip].[dest_lat]
+      ,[next_trip].[dest_lng]
+      ,[next_trip].[distance_miles]
+      ,[next_trip].[travel_time]
+      ,[next_trip].[hhmember1]
+      ,[next_trip].[hhmember2]
+      ,[next_trip].[hhmember3]
+      ,[next_trip].[hhmember4]
+      ,[next_trip].[hhmember5]
+      ,[next_trip].[hhmember6]
+      ,[next_trip].[hhmember7]
+      ,[next_trip].[hhmember8]
+      ,[next_trip].[hhmember9]
+      ,[next_trip].[hhmember10]
+      ,[next_trip].[hhmember11]
+      ,[next_trip].[hhmember12]
+      ,[next_trip].[hhmember13]
+      ,[next_trip].[travelers_hh]
+      ,[next_trip].[travelers_nonhh]
+      ,[next_trip].[travelers_total]
+      ,[next_trip].[origin_purpose]
+      ,[next_trip].[dest_purpose]
+      ,[next_trip].[dest_purpose_other]
+      ,[next_trip].[mode_1]
+      ,[next_trip].[mode_2]
+      ,[next_trip].[mode_3]
+      ,[next_trip].[mode_4]
+      ,[next_trip].[driver]
+      ,[next_trip].[mode_acc]
+      ,[next_trip].[mode_egr]
+      ,[next_trip].[speed_mph]
+      ,[next_trip].[mode_other_specify]
+      ,[next_trip].[origin_geog]
+      ,[next_trip].[dest_geog]
+      ,[next_trip].[dest_is_home]
+      ,[next_trip].[dest_is_work]
+      ,[next_trip].[modes]
+      ,[next_trip].[psrc_inserted]
+      ,[next_trip].[revision_code]
+      ,[next_trip].[psrc_resolved]
+      ,[next_trip].[psrc_comment]
+      , CAST(0 AS int) AS trip_link
     FROM HHSurvey.Trip as trip 
         JOIN HHSurvey.Trip AS next_trip ON trip.person_id=next_trip.person_id AND trip.tripnum + 1 = next_trip.tripnum
     WHERE trip.dest_is_home IS NULL AND trip.dest_is_work IS NULL AND (											  -- destination of preceding leg isn't home or work
@@ -95,40 +142,93 @@ AS BEGIN
     -- set the trip_link value of the 2nd component to the tripnum of the 1st component.
     UPDATE ti  
         SET ti.trip_link = (ti.tripnum - 1)
-        FROM HHSurvey.trip_ingredient AS ti 
-            LEFT JOIN HHSurvey.trip_ingredient AS previous_et ON ti.person_id = previous_et.person_id AND (ti.tripnum - 1) = previous_et.tripnum
+        FROM @trip_ingredients_input AS ti 
+            LEFT JOIN @trip_ingredients_input AS previous_et ON ti.person_id = previous_et.person_id AND (ti.tripnum - 1) = previous_et.tripnum
         WHERE (CONCAT(ti.person_id, (ti.tripnum - 1)) <> CONCAT(previous_et.person_id, previous_et.tripnum));
     
     -- assign trip_link value to remaining records in the trip.
     WITH cte (recid, ref_link) AS 
     (SELECT ti1.recid, MAX(ti1.trip_link) OVER(PARTITION BY ti1.person_id ORDER BY ti1.tripnum ROWS UNBOUNDED PRECEDING) AS ref_link
-        FROM HHSurvey.trip_ingredient AS ti1)
+        FROM @trip_ingredients_input AS ti1)
     UPDATE ti
         SET ti.trip_link = cte.ref_link
-        FROM HHSurvey.trip_ingredient AS ti JOIN cte ON ti.recid = cte.recid
+        FROM @trip_ingredients_input AS ti JOIN cte ON ti.recid = cte.recid
         WHERE ti.trip_link = 0;	
 
     -- add the 1st component without deleting it from the trip table.
-    INSERT INTO HHSurvey.trip_ingredient
-        SELECT t.*, t.tripnum AS trip_link 
+    INSERT INTO @trip_ingredients_input
+        SELECT t.[recid]
+      ,t.[hhid]
+      ,t.[person_id]
+      ,t.[pernum]
+      ,t.[tripid]
+      ,t.[tripnum]
+      ,t.[traveldate]
+      ,t.[daynum]
+      ,t.[depart_time_timestamp]
+      ,t.[arrival_time_timestamp]
+      ,t.[origin_lat]
+      ,t.[origin_lng]
+      ,t.[dest_lat]
+      ,t.[dest_lng]
+      ,t.[distance_miles]
+      ,t.[travel_time]
+      ,t.[hhmember1]
+      ,t.[hhmember2]
+      ,t.[hhmember3]
+      ,t.[hhmember4]
+      ,t.[hhmember5]
+      ,t.[hhmember6]
+      ,t.[hhmember7]
+      ,t.[hhmember8]
+      ,t.[hhmember9]
+      ,t.[hhmember10]
+      ,t.[hhmember11]
+      ,t.[hhmember12]
+      ,t.[hhmember13]
+      ,t.[travelers_hh]
+      ,t.[travelers_nonhh]
+      ,t.[travelers_total]
+      ,t.[origin_purpose]
+      ,t.[dest_purpose]
+      ,t.[dest_purpose_other]
+      ,t.[mode_1]
+      ,t.[mode_2]
+      ,t.[mode_3]
+      ,t.[mode_4]
+      ,t.[driver]
+      ,t.[mode_acc]
+      ,t.[mode_egr]
+      ,t.[speed_mph]
+      ,t.[mode_other_specify]
+      ,t.[origin_geog]
+      ,t.[dest_geog]
+      ,t.[dest_is_home]
+      ,t.[dest_is_work]
+      ,t.[modes]
+      ,t.[psrc_inserted]
+      ,t.[revision_code]
+      ,t.[psrc_resolved]
+      ,t.[psrc_comment]
+      ,t.tripnum AS trip_link 
         FROM HHSurvey.Trip AS t 
-            JOIN HHSurvey.trip_ingredient AS ti ON t.person_id = ti.person_id AND t.tripnum = ti.trip_link AND t.tripnum = ti.tripnum - 1;
+            JOIN @trip_ingredients_input AS ti ON t.person_id = ti.person_id AND t.tripnum = ti.trip_link AND t.tripnum = ti.tripnum - 1;
 
     WITH cte_b AS 
         (SELECT DISTINCT ti_wndw2.person_id, ti_wndw2.trip_link, Elmer.dbo.TRIM(Elmer.dbo.rgx_replace(
             STUFF((SELECT ',' + ti2.modes				--non-adjacent repeated modes, i.e. suggests a loop trip
-                FROM HHSurvey.trip_ingredient AS ti2
+                FROM @trip_ingredients_input AS ti2
                 WHERE ti2.person_id = ti_wndw2.person_id AND ti2.trip_link = ti_wndw2.trip_link 
                 GROUP BY ti2.modes
                 ORDER BY ti_wndw2.person_id DESC, ti_wndw2.tripnum DESC
                 FOR XML PATH('')), 1, 1, NULL),'(\b\d+\b),(?=\1)','',1)) AS modes	
-        FROM HHSurvey.trip_ingredient as ti_wndw2),
+        FROM @trip_ingredients_input as ti_wndw2),
     cte2 AS 
         (SELECT ti3.person_id, ti3.trip_link 			--sets with more than 6 trip components
-            FROM HHSurvey.trip_ingredient as ti3 GROUP BY ti3.person_id, ti3.trip_link
+            FROM @trip_ingredients_input as ti3 GROUP BY ti3.person_id, ti3.trip_link
             HAVING count(*) > 6 
         /*UNION ALL SELECT ti4.person_id, ti4.trip_link --sets with two items that each denote a separate trip
-            FROM HHSurvey.trip_ingredient as ti4 GROUP BY ti4.person_id, ti4.trip_link
+            FROM @trip_ingredients_input as ti4 GROUP BY ti4.person_id, ti4.trip_link
             HAVING sum(CASE WHEN ti4.change_vehicles = 1 THEN 1 ELSE 0 END) > 1*/
         UNION ALL SELECT cte_b.person_id, cte_b.trip_link	--sets with a pair of modes repeating in reverse (i.e., return trip)
             FROM cte_b
@@ -136,11 +236,12 @@ AS BEGIN
             )
     UPDATE ti
         SET ti.trip_link = -1 * ti.trip_link
-        FROM HHSurvey.trip_ingredient AS ti JOIN cte2 ON cte2.person_id = ti.person_id AND cte2.trip_link = ti.trip_link;
+        FROM @trip_ingredients_input AS ti JOIN cte2 ON cte2.person_id = ti.person_id AND cte2.trip_link = ti.trip_link;
 
-    UPDATE HHSurvey.trip_ingredient
+    UPDATE @trip_ingredients_input
     SET modes=Elmer.dbo.rgx_replace(modes,',1,','',1) WHERE Elmer.dbo.rgx_find(modes,',1,',1)=1; -- Not necessary to represent walk between other modes besides access/egress.
     COMMIT TRANSACTION;
+    EXECUTE HHSurvey.link_trips @trip_ingredients_input;
 
 END
 GO
