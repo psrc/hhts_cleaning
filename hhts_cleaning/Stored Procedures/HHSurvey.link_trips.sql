@@ -2,10 +2,84 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE PROCEDURE [HHSurvey].[link_trips] AS
+CREATE PROCEDURE [HHSurvey].[link_trips]
+    @trip_ingredients HHSurvey.TripIngredientType READONLY
+AS
 BEGIN
+    -- Clean up any existing temp table from previous runs
+    IF OBJECT_ID('tempdb..#trip_ingredient') IS NOT NULL
+        DROP TABLE #trip_ingredient;
+    
+    -- Create temp table with explicit structure
+    CREATE TABLE #trip_ingredient (
+        [recid] decimal(19,0) NOT NULL,
+        [hhid] decimal(19,0) NOT NULL,
+        [person_id] decimal(19,0) NOT NULL,
+        [pernum] [int] NULL,
+        [tripid] decimal(19,0) NULL,
+        [tripnum] [int] NOT NULL,
+        [traveldate] datetime2 NULL,
+        [daynum] [int] NULL,
+        [depart_time_timestamp] datetime2 NULL,
+        [arrival_time_timestamp] datetime2 NULL,
+        [origin_lat] [float] NULL,
+        [origin_lng] [float] NULL,
+        [dest_lat] [float] NULL,
+        [dest_lng] [float] NULL,
+        [distance_miles] [float] NULL,
+        [travel_time] float NULL,
+        [hhmember1] decimal(19,0) NULL,
+        [hhmember2] decimal(19,0) NULL,
+        [hhmember3] decimal(19,0) NULL,
+        [hhmember4] decimal(19,0) NULL,
+        [hhmember5] decimal(19,0) NULL,
+        [hhmember6] decimal(19,0) NULL,
+        [hhmember7] decimal(19,0) NULL,
+        [hhmember8] decimal(19,0) NULL,
+        [hhmember9] decimal(19,0) NULL,
+        [hhmember10] decimal(19,0) NULL,
+        [hhmember11] decimal(19,0) NULL,
+        [hhmember12] decimal(19,0) NULL,
+        [hhmember13] decimal(19,0) NULL,
+        [travelers_hh] [int] NULL,
+        [travelers_nonhh] [int] NULL,
+        [travelers_total] [int] NULL,
+        [origin_purpose] [int] NULL,
+        [dest_purpose] [int] NULL,
+        [dest_purpose_other] nvarchar(255) NULL,
+        [mode_1] int NULL,
+        [mode_2] int NULL,
+        [mode_3] int NULL,
+        [mode_4] int NULL,
+        [driver] int NULL,
+        [mode_acc] int NULL,
+        [mode_egr] int NULL,
+        [speed_mph] [float] NULL,
+        [mode_other_specify] nvarchar(1000) NULL,
+        [origin_geog] GEOGRAPHY NULL,
+        [dest_geog] GEOGRAPHY NULL,
+        [dest_is_home] bit NULL,
+        [dest_is_work] bit NULL,
+        [modes] nvarchar(255) NULL,
+        [psrc_inserted] bit NULL,
+        [revision_code] nvarchar(255) NULL,
+        [psrc_resolved] int NULL,
+        [psrc_comment] nvarchar(255) NULL,
+        [trip_link] int NOT NULL
+    );
+    
+    -- If parameter provided, use it; otherwise read from named table
+    IF EXISTS (SELECT 1 FROM @trip_ingredients)
+    BEGIN
+        INSERT INTO #trip_ingredient SELECT * FROM @trip_ingredients;
+    END
+    ELSE
+    BEGIN
+        INSERT INTO #trip_ingredient SELECT * FROM HHSurvey.trip_ingredient;
+    END
 
     -- meld the trip ingredients to create the fields that will populate the linked trip, and saves those as a separate table, 'linked_trip'.
+    BEGIN TRANSACTION;
     DROP TABLE IF EXISTS #linked_trips;	
 
     UPDATE HHSurvey.Trip
@@ -33,7 +107,7 @@ BEGIN
             MAX((CASE WHEN ti_agg.travelers_hh 			IN (995) THEN -1 ELSE 1 END) * ti_agg.travelers_hh 			 ) AS travelers_hh, 				
             MAX((CASE WHEN ti_agg.travelers_nonhh 		IN (995) THEN -1 ELSE 1 END) * ti_agg.travelers_nonhh 		 ) AS travelers_nonhh,				
             MAX((CASE WHEN ti_agg.travelers_total 		IN (995) THEN -1 ELSE 1 END) * ti_agg.travelers_total 		 ) AS travelers_total								
-        FROM HHSurvey.trip_ingredient as ti_agg WHERE ti_agg.trip_link > 0 GROUP BY ti_agg.person_id, ti_agg.trip_link),
+        FROM #trip_ingredient as ti_agg WHERE ti_agg.trip_link > 0 GROUP BY ti_agg.person_id, ti_agg.trip_link),
     cte_wndw AS	
     (SELECT 
             ti_wndw.person_id AS person_id2,
@@ -49,12 +123,12 @@ BEGIN
             --STRING_AGG(ti_wnd.modes,',') 		OVER (PARTITION BY ti_wnd.trip_link ORDER BY ti_wndw.tripnum ASC) AS modes -- Thought this would work with MSSQL2017+ but not w/ windowing
             Elmer.dbo.TRIM(Elmer.dbo.rgx_replace(STUFF(
                 (SELECT ',' + ti1.modes
-                FROM HHSurvey.trip_ingredient AS ti1 
+                FROM #trip_ingredient AS ti1 
                 WHERE ti1.person_id = ti_wndw.person_id AND ti1.trip_link = ti_wndw.trip_link
                 GROUP BY ti1.modes
                 ORDER BY ti_wndw.person_id DESC, ti_wndw.tripnum DESC
                 FOR XML PATH('')), 1, 1, NULL),'(-?\b\d+\b),(?=\b\1\b)','',1)) AS modes
-        FROM HHSurvey.trip_ingredient as ti_wndw WHERE ti_wndw.trip_link > 0 )
+        FROM #trip_ingredient as ti_wndw WHERE ti_wndw.trip_link > 0 )
     SELECT DISTINCT cte_wndw.*, cte_agg.* INTO #linked_trips
         FROM cte_wndw JOIN cte_agg ON cte_wndw.person_id2 = cte_agg.person_id AND cte_wndw.trip_link2 = cte_agg.trip_link;
 
@@ -71,6 +145,8 @@ BEGIN
         WHERE t.origin_geog.STDistance(lt.dest_geog) < 50                                                                         -- discard potential linked trips that return to the same location
             OR (lt.origin_purpose=lt.dest_purpose AND lt.dest_purpose IN(1,10))                                                     -- or would result in a looped purpose
             OR DATEDIFF(Minute, t.depart_time_timestamp, lt.arrival_time_timestamp) / t.origin_geog.STDistance(lt.dest_geog) > 30; -- or speed suggests a stop
+    COMMIT TRANSACTION;
+
 
     IF NOT EXISTS (SELECT 1 FROM #linked_trips)
     BEGIN
@@ -79,8 +155,9 @@ BEGIN
 
 
     -- delete the components that will get replaced with linked trips
+    BEGIN TRANSACTION;
     DELETE t
-    FROM HHSurvey.Trip AS t JOIN HHSurvey.trip_ingredient AS ti ON t.recid=ti.recid
+    FROM HHSurvey.Trip AS t JOIN #trip_ingredient AS ti ON t.recid=ti.recid
         WHERE t.tripnum <> ti.trip_link AND EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE ti.person_id = lt.person_id AND ti.trip_link = lt.trip_link);	
 
     -- this update achieves trip linking via revising elements of the 1st component (purposely left in the trip table).		
@@ -118,9 +195,9 @@ BEGIN
 
     --move the ingredients to another named table so this procedure can be re-run as sproc during manual cleaning
 
-    DELETE FROM HHSurvey.trip_ingredient
+    DELETE FROM #trip_ingredient
     OUTPUT deleted.* INTO HHSurvey.trip_ingredients_done
-    WHERE HHSurvey.trip_ingredient.trip_link > 0;
+    WHERE #trip_ingredient.trip_link > 0;
 
     /* STEP 6.	Mode number standardization, including access and egress characterization */
 
@@ -208,14 +285,16 @@ BEGIN
 
     UPDATE HHSurvey.Trip SET mode_acc = 995 WHERE mode_acc IS NULL;
     UPDATE HHSurvey.Trip SET mode_1   = 995 WHERE mode_1   IS NULL;
-    UPDATE HHSurvey.Trip SET mode_2   = 995 WHERE mode_2   IS NULL
+    UPDATE HHSurvey.Trip SET mode_2   = 995 WHERE mode_2   IS NULL;
     UPDATE HHSurvey.Trip SET mode_3   = 995 WHERE mode_3   IS NULL;
     UPDATE HHSurvey.Trip SET mode_4   = 995 WHERE mode_4   IS NULL; 
     UPDATE HHSurvey.Trip SET mode_egr = 995 WHERE mode_egr IS NULL;
+    COMMIT TRANSACTION;
 
     --temp tables should disappear when the spoc ends, but to be tidy we explicitly delete them.
-    DROP TABLE IF EXISTS HHSurvey.trip_ingredient
-    DROP TABLE IF EXISTS #linked_trips
+    DROP TABLE IF EXISTS HHSurvey.trip_ingredient;
+    DROP TABLE IF EXISTS #trip_ingredient;
+    DROP TABLE IF EXISTS #linked_trips;
     EXEC HHSurvey.recalculate_after_edit;
 
 END
