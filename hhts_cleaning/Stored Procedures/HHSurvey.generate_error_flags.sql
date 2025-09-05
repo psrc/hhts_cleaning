@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE PROCEDURE [HHSurvey].[generate_error_flags] 
+CREATE   PROCEDURE [HHSurvey].[generate_error_flags] 
     @target_person_id decimal = NULL --If missing, generated for all records
 AS BEGIN
     SET NOCOUNT ON
@@ -91,7 +91,7 @@ AS BEGIN
             GROUP BY  t7.person_id 
             HAVING count(*)=1
 
-        UNION ALL SELECT  t8.recid,  t8.person_id,  t8.tripnum,									        	'underage_detailed driver' AS error_flag
+        UNION ALL SELECT  t8.recid,  t8.person_id,  t8.tripnum,									        	'underage driver' AS error_flag
             FROM hhts_cleaning.HHSurvey.Person AS p
             JOIN trip_ref AS t8 ON p.person_id = t8.person_id
             WHERE t8.driver = 1 AND (p.age_detailed BETWEEN 0 AND 15)
@@ -103,7 +103,7 @@ AS BEGIN
 
         UNION ALL SELECT  t11.recid,  t11.person_id,  t11.tripnum, 							 		 'non-worker + work trip' AS error_flag
             FROM trip_ref AS t11 JOIN hhts_cleaning.HHSurvey.Person AS p ON p.person_id= t11.person_id
-            WHERE p.employment > 4 AND  t11.dest_purpose in(SELECT purpose_id FROM HHSurvey.work_purposes)
+            WHERE p.employment IN(5,6,7) AND  t11.dest_purpose in(SELECT purpose_id FROM HHSurvey.work_purposes)
 
         UNION ALL SELECT t12.recid, t12.person_id, t12.tripnum, 												'instantaneous' AS error_flag
             FROM trip_ref AS t12	
