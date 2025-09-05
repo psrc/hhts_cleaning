@@ -2,6 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
+
 CREATE   PROCEDURE [HHSurvey].[link_trips]
     @trip_ingredients HHSurvey.TripIngredientType READONLY
 AS
@@ -126,7 +127,24 @@ BEGIN
     --move the ingredients to another named table so this procedure can be re-run as sproc during manual cleaning
 
     DELETE FROM #trip_ingredient
-    OUTPUT deleted.* INTO HHSurvey.trip_ingredients_done
+    OUTPUT 
+		DELETED.recid, DELETED.hhid, DELETED.person_id, DELETED.pernum, DELETED.tripid, DELETED.tripnum,
+		DELETED.traveldate, DELETED.daynum, DELETED.depart_time_timestamp, DELETED.arrival_time_timestamp, DELETED.origin_lat, 
+		DELETED.origin_lng, DELETED.dest_lat, DELETED.dest_lng, DELETED.distance_miles, DELETED.travel_time, DELETED.hhmember1, 
+		DELETED.hhmember2, DELETED.hhmember3, DELETED.hhmember4, DELETED.hhmember5, DELETED.hhmember6, 
+		DELETED.hhmember7, DELETED.hhmember8, DELETED.hhmember9, DELETED.hhmember10, DELETED.hhmember11, DELETED.hhmember12, 
+		DELETED.hhmember13, DELETED.travelers_hh, DELETED.travelers_nonhh, DELETED.travelers_total, DELETED.origin_purpose, 
+		DELETED.dest_purpose, DELETED.dest_purpose_other, DELETED.mode_1, DELETED.mode_2, DELETED.mode_3, DELETED.mode_4, 
+		DELETED.driver, DELETED.mode_acc, DELETED.mode_egr, DELETED.speed_mph, DELETED.mode_other_specify, 
+		DELETED.origin_geog, DELETED.dest_geog, DELETED.dest_is_home, DELETED.dest_is_work,
+		DELETED.modes, DELETED.psrc_inserted, DELETED.revision_code, DELETED.psrc_resolved, DELETED.psrc_comment, DELETED.trip_link
+	INTO HHSurvey.trip_ingredients_done (
+		recid, hhid, person_id, pernum, tripid, tripnum, traveldate, daynum, depart_time_timestamp, arrival_time_timestamp, origin_lat,
+		origin_lng, dest_lat, dest_lng, distance_miles, travel_time, hhmember1, hhmember2, hhmember3, hhmember4, hhmember5, hhmember6,
+		hhmember7, hhmember8, hhmember9, hhmember10, hhmember11, hhmember12, hhmember13, travelers_hh, travelers_nonhh, travelers_total, origin_purpose,
+		dest_purpose, dest_purpose_other, mode_1, mode_2, mode_3, mode_4, driver, mode_acc, mode_egr, speed_mph, mode_other_specify,
+		origin_geog, dest_geog, dest_is_home, dest_is_work, modes, psrc_inserted, revision_code, psrc_resolved, psrc_comment, trip_link
+	)
     WHERE #trip_ingredient.trip_link > 0;
 
     /* STEP 6.	Mode number standardization, including access and egress characterization */

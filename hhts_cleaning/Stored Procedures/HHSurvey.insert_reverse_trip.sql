@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-	CREATE PROCEDURE [HHSurvey].[insert_reverse_trip]
+	CREATE   PROCEDURE [HHSurvey].[insert_reverse_trip]
 			@target_recid int, 
             @startdatetime nvarchar(19)
 
@@ -22,26 +22,17 @@ GO
 			INSERT INTO HHSurvey.Trip (hhid, 
                                        person_id, 
                                        pernum, 
-                                       day_id,
-                                       psrc_inserted, 
                                        tripnum,
+                                       traveldate,
+                                       daynum,
+                                       depart_time_timestamp, 
+                                       arrival_time_timestamp,
                                        origin_lat, 
                                        origin_lng, 
                                        dest_lat, 
                                        dest_lng, 
-                                       depart_time_timestamp, 
-                                       arrival_time_timestamp,
                                        distance_miles,
-                                       origin_purpose, 
-                                       dest_purpose, 
-                                       modes, 
-                                       mode_acc, 
-                                       mode_1, mode_2, mode_3, mode_4,
-                                       mode_egr, 
-                                       travelers_hh, 
-                                       travelers_nonhh, 
-                                       travelers_total,
-                                       driver,
+                                       travel_time,
                                        hhmember1,
                                        hhmember2,
                                        hhmember3,
@@ -54,30 +45,35 @@ GO
                                        hhmember10,
                                        hhmember11,
                                        hhmember12,
-                                       hhmember13)
+                                       hhmember13,
+                                       travelers_hh, 
+                                       travelers_nonhh, 
+                                       travelers_total,
+                                       origin_purpose, 
+                                       dest_purpose, 
+                                       mode_1, 
+                                       mode_2, 
+                                       mode_3, 
+                                       mode_4,
+                                       driver,
+                                       mode_acc, 
+                                       mode_egr,
+                                       modes,
+                                       psrc_inserted)
 			SELECT t.hhid, 
                    t.person_id, 
                    t.pernum, 
-                   t.day_id,
-                   1 AS psrc_inserted, 
                    0 AS tripnum,
+                   t.traveldate,
+                   t.daynum,
+                   cte.depart_time_timestamp, 
+                   DATEADD(minute, cte.travel_time_elapsed, cte.depart_time_timestamp) AS arrival_time_timestamp,
                    t.dest_lat AS origin_lat, -- dest of previous trip as origin of reverse trip
                    t.dest_lng AS origin_lng, 
                    t.origin_lat AS dest_lat,  -- origin of previous trip as dest of reverse trip
                    t.origin_lng AS dest_lng, 
-                   cte.depart_time_timestamp, 
-                   DATEADD(minute, cte.travel_time_elapsed, cte.depart_time_timestamp) AS arrival_time_timestamp,
                    t.distance_miles,
-                   t.dest_purpose AS origin_purpose,   -- dest purpose of previous trip as origin purpose of reverse trip
-                   t.origin_purpose AS dest_purpose,  -- origin purpose of previous trip as dest purpose of reverse trip
-                   t.modes, 
-                   t.mode_acc, 
-                   t.mode_1,mode_2, mode_3, mode_4,
-                   t.mode_egr, 
-                   t.travelers_hh, 
-                   t.travelers_nonhh, 
-                   t.travelers_total,
-                   -992 AS driver,
+                   cte.travel_time_elapsed AS travel_time,
                    -992 AS hhmember1,
                    -992 AS hhmember2,
                    -992 AS hhmember3,
@@ -90,7 +86,21 @@ GO
                    -992 AS hhmember10,
                    -992 AS hhmember11,
                    -992 AS hhmember12,
-                   -992 AS hhmember13
+                   -992 AS hhmember13,
+                   t.travelers_hh, 
+                   t.travelers_nonhh, 
+                   t.travelers_total,
+                   t.dest_purpose AS origin_purpose,   -- dest purpose of previous trip as origin purpose of reverse trip
+                   t.origin_purpose AS dest_purpose,  -- origin purpose of previous trip as dest purpose of reverse trip
+                   t.mode_1, 
+                   t.mode_2, 
+                   t.mode_3, 
+                   t.mode_4,
+                   -992 AS driver,
+                   t.mode_acc, 
+                   t.mode_egr,
+                   t.modes,
+                   1 AS psrc_inserted
 			FROM HHSurvey.Trip AS t 
             JOIN cte ON t.recid=cte.recid;
 			END
