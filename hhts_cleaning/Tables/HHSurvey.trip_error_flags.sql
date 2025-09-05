@@ -26,3 +26,5 @@ WITH
 SYSTEM_VERSIONING = ON (HISTORY_TABLE = [History].[HHSurvey__trip_error_flags])
 )
 GO
+CREATE NONCLUSTERED INDEX [IX_trip_error_flags_recid_errorflag] ON [HHSurvey].[trip_error_flags] ([recid], [error_flag]) ON [PRIMARY]
+GO

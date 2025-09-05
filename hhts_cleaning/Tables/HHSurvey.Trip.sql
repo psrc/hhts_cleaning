@@ -130,6 +130,8 @@ CREATE NONCLUSTERED INDEX [person_idx] ON [HHSurvey].[Trip] ([person_id]) ON [PR
 GO
 CREATE NONCLUSTERED INDEX [person_tripnum_idx] ON [HHSurvey].[Trip] ([person_id], [tripnum]) ON [PRIMARY]
 GO
+CREATE NONCLUSTERED INDEX [IX_Trip_recid_person] ON [HHSurvey].[Trip] ([recid], [person_id]) ON [PRIMARY]
+GO
 CREATE NONCLUSTERED INDEX [travelers_total_idx] ON [HHSurvey].[Trip] ([travelers_total]) ON [PRIMARY]
 GO
 CREATE NONCLUSTERED INDEX [tripnum_idx] ON [HHSurvey].[Trip] ([tripnum]) ON [PRIMARY]
