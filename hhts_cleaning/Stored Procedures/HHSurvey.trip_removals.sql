@@ -23,9 +23,7 @@ AS BEGIN
 	WITH cte AS (
 		SELECT t.recid 
 		FROM HHSurvey.Trip AS t 
-		JOIN 		HHSurvey.Trip AS prior_t ON t.person_id = prior_t.person_id AND t.tripnum - 1 = prior_t.tripnum AND t.daynum = prior_t.daynum
-		LEFT JOIN 	HHSurvey.Trip AS next_t  ON t.person_id = next_t.person_id  AND t.tripnum + 1 = next_t.tripnum  AND t.daynum = next_t.daynum
-		WHERE t.origin_purpose = 1 AND t.dest_purpose = 1 AND next_t.recid IS NULL AND ABS(t.dest_geog.STDistance(t.origin_geog)) < 100 ) -- points within 100m of one another
+		WHERE t.distance_miles = 0 AND t.revision_code NOT LIKE '%8,%')
 	DELETE FROM HHSurvey.Trip OUTPUT deleted.* INTO HHSurvey.removed_trip
 		WHERE EXISTS (SELECT 1 FROM cte WHERE Trip.recid = cte.recid);
 	COMMIT TRANSACTION;
