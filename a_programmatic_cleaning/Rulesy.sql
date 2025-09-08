@@ -79,20 +79,18 @@ DECLARE @BingKey nvarchar = ['use your Bing API key here']
 	EXECUTE HHSurvey.dest_purpose_updates;                      -- Destination purpose revisions (extensive)
 
 /* STEP 4. Revise travel times (and where necessary, mode) */  
-	EXECUTE HHSurvey.revise_excessive_speed_trips @BingKey;     -- Change departure or arrival times for records that would qualify for 'excessive speed' flag
+	EXECUTE HHSurvey.revise_excessive_speed_trips @GoogleKey = 'AIzaSyDUFEM3ItKeuOWH9nc0XZN15tX_PFBKaFU';     -- Change departure or arrival times for records that would qualify for 'excessive speed' flag
 
-/* STEP 5.	Trip linking */
-	EXECUTE HHSurvey.trip_link_prep;                            -- Sets up trip linking (only run once)
-	EXECUTE HHSurvey.link_trips;                                -- Executes trip linking. Can be called from Fixie for edited trips
+/* STEP 5.	Trip linking */ 
+	EXECUTE HHSurvey.link_trips_systemically;                   -- Executes trip linking. Can be called from Fixie for edited trips
 
 /* Step 6. Impute missing purpose for cases that can be assumed by location */
-	EXECUTE HHSurvey.impute_purpose_from_location @BingKey;     -- Utilizes table HHSurvey.Bing_location_types, for verification see step 0 above
+	EXECUTE HHSurvey.impute_purpose_from_location @GoogleKey = 'AIzaSyDUFEM3ItKeuOWH9nc0XZN15tX_PFBKaFU';     -- Utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
 			 
 /* STEP 7. Harmonize trips where possible: add trips for non-reporting cotravelers, missing trips between destinations, and remove duplicates  */
 	--FYI HHSurvey.insert_silent_passenger_trips exists but intentionally is NOT used; RSG is also doing something on this issue.
-	--FYI HHSurvey.fill_missing_link exists but intentionally is NOT used; we have accepted the missing links rather than impute so many trips.
-
-	--EXECUTE HHSurvey.fix_mistaken_passenger_carryovers;         -- When 'driver' code or work purpose are attributed to accompanying passengers
+	EXECUTE HHSurvey.fill_missing_link;                         -- Inserts a bridge trip where discontinuity exists (e.g. the App was turned off)
+	EXECUTE HHSurvey.fix_mistaken_passenger_carryovers;         -- When 'driver' code or work purpose are attributed to accompanying passengers
 	EXECUTE HHSurvey.trip_removals;                             -- Creates removed_trip table & removes duplicated 'go home' trips created by rMove
 	EXECUTE HHSurvey.cleanup_trips;	                            -- Snap origin points to prior destination, when proximate
 
