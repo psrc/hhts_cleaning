@@ -1,0 +1,26 @@
+error_flag                                                                                           flag_count  percentage
+---------------------------------------------------------------------------------------------------- ----------- ----------
+"change mode" purpose                                                                                        702      24.56
+too long at dest?                                                                                            683      23.90
+missing next trip link                                                                                       310      10.85
+mode_1 missing                                                                                               191       6.68
+starts, not from home                                                                                        180       6.30
+lone trip                                                                                                    177       6.19
+same dest as prior                                                                                           152       5.32
+purpose missing                                                                                              140       4.90
+ends day, not home                                                                                           127       4.44
+excessive speed                                                                                               69       2.41
+too slow                                                                                                      58       2.03
+instantaneous                                                                                                 19        .66
+purpose at odds w/ dest                                                                                       18        .63
+non-student + school trip                                                                                     16        .56
+no activity time after                                                                                         8        .28
+initial trip purpose missing                                                                                   7        .24
+underage_detailed driver                                                                                       1        .03
+
+(17 rows affected)
+total_error_records unique_error_types persons_with_errors trips_with_errors
+------------------- ------------------ ------------------- -----------------
+               2858                 17                1177              2438
+
+(1 rows affected)

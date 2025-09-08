@@ -41,13 +41,16 @@ CASE WHEN h.hh_iscomplete_b=1 THEN 'complete' ELSE 'incomplete' END;
 
 --Trip error code count
 SELECT error_flag, [1] AS rMove, [2] AS rSurvey
-FROM
-(SELECT CASE WHEN h.hhgroup=11 THEN 1 ELSE 2 END AS hhgroup, tef.error_flag, t.recid
-FROM HHSurvey.trip_error_flags AS tef JOIN HHSurvey.Trip as t ON t.recid=tef.recid JOIN hhts_cleaning.HHSurvey.Household AS h ON t.hhid=h.hhid
+FROM (
+    SELECT CASE WHEN h.hhgroup IN(5,8,11) THEN 1 ELSE 2 END AS hhgroup, tef.error_flag, t.recid
+    FROM HHSurvey.trip_error_flags AS tef 
+    JOIN HHSurvey.Trip as t ON t.recid=tef.recid 
+    JOIN hhts_cleaning.HHSurvey.Household AS h ON t.hhid=h.hhid
+) AS source_data
 PIVOT
 (
- count(recid)
- FOR hhgroup IN ([1], [2])
+    COUNT(recid)
+    FOR hhgroup IN ([1], [2])
 ) AS pvt
 ORDER BY pvt.error_flag;
 
