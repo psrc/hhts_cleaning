@@ -79,13 +79,13 @@ DECLARE @BingKey nvarchar = ['use your Bing API key here']
 	EXECUTE HHSurvey.dest_purpose_updates;                      -- Destination purpose revisions (extensive)
 
 /* STEP 4. Revise travel times (and where necessary, mode) */  
-	EXECUTE HHSurvey.revise_excessive_speed_trips @GoogleKey = 'AIzaSyDUFEM3ItKeuOWH9nc0XZN15tX_PFBKaFU';     -- Change departure or arrival times for records that would qualify for 'excessive speed' flag
+	EXECUTE HHSurvey.revise_excessive_speed_trips @GoogleKey = [key here];     -- Change departure or arrival times for records that would qualify for 'excessive speed' flag
 
 /* STEP 5.	Trip linking */ 
 	EXECUTE HHSurvey.link_trips_systemically;                   -- Executes trip linking. Can be called from Fixie for edited trips
 
 /* Step 6. Impute missing purpose for cases that can be assumed by location */
-	EXECUTE HHSurvey.impute_purpose_from_location @GoogleKey = 'AIzaSyDUFEM3ItKeuOWH9nc0XZN15tX_PFBKaFU';     -- Utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
+	EXECUTE HHSurvey.impute_purpose_from_location @GoogleKey = [key here];     -- Utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
 			 
 /* STEP 7. Harmonize trips where possible: add trips for non-reporting cotravelers, missing trips between destinations, and remove duplicates  */
 	--FYI HHSurvey.insert_silent_passenger_trips exists but intentionally is NOT used; RSG is also doing something on this issue.
