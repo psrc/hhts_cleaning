@@ -1,0 +1,10 @@
+# Ignore ad-hoc import scripts in Redgate script folders
+# These are not stored procedures and can confuse Redgate’s parser
+/hhts_cleaning/Stored Procedures/import_*.sql
+
+# Local environment artifacts (optional safety)
+.DS_Store
+Thumbs.db
+*.user
+*.suo
+*.swp
