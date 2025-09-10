@@ -62,9 +62,9 @@ AS BEGIN
 			
 		SET @person_id = (SELECT TOP 1 person_id FROM @trip_ingredients_param);
 
-		EXECUTE HHSurvey.link_trips @trip_ingredients = @trip_ingredients_param;
-		EXECUTE HHSurvey.tripnum_update @person_id;
-		EXECUTE HHSurvey.generate_error_flags @person_id;
+	EXECUTE HHSurvey.link_trips @trip_ingredients = @trip_ingredients_param;
+	-- trip numbering is handled within HHSurvey.link_trips via HHSurvey.recalculate_after_edit(@person)
+	EXECUTE HHSurvey.generate_error_flags @person_id;
 		DROP TABLE IF EXISTS #recid_list;
 		SET @person_id = NULL
 		SET @recid_list = NULL

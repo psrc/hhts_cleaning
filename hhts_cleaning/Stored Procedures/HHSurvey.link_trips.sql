@@ -12,9 +12,7 @@ BEGIN
     -- meld the trip ingredients to create the fields that will populate the linked trip, and saves those as a separate table, 'linked_trip'.
     BEGIN TRANSACTION;
     DROP TABLE IF EXISTS #linked_trips;	
-
-    UPDATE HHSurvey.Trip
-        SET modes = CONCAT_WS(',', mode_1, mode_2, mode_3, mode_4);
+    -- NOTE: Avoid global recomputation of modes here; we'll recompute only for affected trip(s) below.
         
     WITH cte_agg AS
     (SELECT ti_agg.person_id,
@@ -84,6 +82,10 @@ BEGIN
         THROW 50001, 'All linked trips were filtered out because they would return to the same location, result in a looped purpose, or speed suggests a stop.', 1;
     END;
 
+    -- Collect affected people for scoping downstream operations
+    DROP TABLE IF EXISTS #affected_people;
+    SELECT DISTINCT person_id INTO #affected_people FROM #linked_trips;
+
 
     -- delete the components that will get replaced with linked trips
     BEGIN TRANSACTION;
@@ -152,33 +154,49 @@ BEGIN
     --eliminate repeated values for modes
     UPDATE t 
         SET t.modes				= Elmer.dbo.TRIM(Elmer.dbo.rgx_replace(t.modes,'(-?\b\d+\b),(?=\b\1\b)','',1))
-        FROM HHSurvey.Trip AS t WHERE EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE lt.person_id =t.person_id AND lt.trip_link = t.tripnum)
+        FROM HHSurvey.Trip AS t WHERE EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE lt.person_id = t.person_id AND lt.trip_link = t.tripnum)
         ;
-
-    EXECUTE HHSurvey.tripnum_update; 
+    -- Defer trip re-numbering to recalculate_after_edit (scoped per person)
             
     -- Populate separate mode fields
         WITH cte AS 
-        (SELECT t.recid, Elmer.dbo.rgx_replace(t.modes, '(?<=\b\1,.*)\b(\w+),?','',1) AS mode_reduced FROM HHSurvey.Trip AS t)
+        (
+            SELECT t.recid,
+                   Elmer.dbo.rgx_replace(t.modes, '(?<=\b\1,.*)\b(\w+),?','',1) AS mode_reduced
+            FROM HHSurvey.Trip AS t
+            JOIN #linked_trips AS lt2 ON t.person_id = lt2.person_id AND t.tripnum = lt2.trip_link
+        )
     UPDATE t
         SET mode_1 = COALESCE((SELECT match FROM Elmer.dbo.rgx_matches(cte.mode_reduced,'\b\d+\b',1) ORDER BY match_index OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY), 995),
             mode_2 = COALESCE((SELECT match FROM Elmer.dbo.rgx_matches(cte.mode_reduced,'\b\d+\b',1) ORDER BY match_index OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY), 995),
             mode_3 = COALESCE((SELECT match FROM Elmer.dbo.rgx_matches(cte.mode_reduced,'\b\d+\b',1) ORDER BY match_index OFFSET 2 ROWS FETCH NEXT 1 ROWS ONLY), 995),
             mode_4 = COALESCE((SELECT match FROM Elmer.dbo.rgx_matches(cte.mode_reduced,'\b\d+\b',1) ORDER BY match_index OFFSET 3 ROWS FETCH NEXT 1 ROWS ONLY), 995)
-    FROM HHSurvey.Trip AS t JOIN cte ON t.recid = cte.recid AND EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE lt.person_id =t.person_id AND lt.trip_link = t.tripnum)
+    FROM HHSurvey.Trip AS t JOIN cte ON t.recid = cte.recid
     ;
-
-    UPDATE HHSurvey.Trip SET mode_acc = 995 WHERE mode_acc IS NULL;
-    UPDATE HHSurvey.Trip SET mode_1   = 995 WHERE mode_1   IS NULL;
-    UPDATE HHSurvey.Trip SET mode_2   = 995 WHERE mode_2   IS NULL;
-    UPDATE HHSurvey.Trip SET mode_3   = 995 WHERE mode_3   IS NULL;
-    UPDATE HHSurvey.Trip SET mode_4   = 995 WHERE mode_4   IS NULL; 
-    UPDATE HHSurvey.Trip SET mode_egr = 995 WHERE mode_egr IS NULL;
+    -- Limit NULL-to-995 normalization to affected trips only
+    UPDATE t SET t.mode_acc = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_acc IS NULL;
+    UPDATE t SET t.mode_1   = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_1   IS NULL;
+    UPDATE t SET t.mode_2   = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_2   IS NULL;
+    UPDATE t SET t.mode_3   = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_3   IS NULL;
+    UPDATE t SET t.mode_4   = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_4   IS NULL; 
+    UPDATE t SET t.mode_egr = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_egr IS NULL;
     COMMIT TRANSACTION;
 
     --temp tables should disappear when the spoc ends, but to be tidy we explicitly delete them.
     DROP TABLE IF EXISTS #linked_trips;
-    EXEC HHSurvey.recalculate_after_edit;
+    
+    -- Recalculate only for affected people (this includes per-person tripnum_update)
+    DECLARE @pid_dec DECIMAL(19,0);
+    DECLARE cur_recalc CURSOR LOCAL FAST_FORWARD FOR SELECT person_id FROM #affected_people;
+    OPEN cur_recalc;
+    FETCH NEXT FROM cur_recalc INTO @pid_dec;
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        EXEC HHSurvey.recalculate_after_edit @target_person_id = @pid_dec;
+        FETCH NEXT FROM cur_recalc INTO @pid_dec;
+    END
+    CLOSE cur_recalc; DEALLOCATE cur_recalc;
+    DROP TABLE IF EXISTS #affected_people;
 
 END
 GO

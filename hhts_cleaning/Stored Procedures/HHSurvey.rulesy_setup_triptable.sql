@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE PROCEDURE [HHSurvey].[rulesy_setup_triptable]
+CREATE   PROCEDURE [HHSurvey].[rulesy_setup_triptable]
 AS BEGIN
 
     BEGIN TRANSACTION;
@@ -201,6 +201,7 @@ AS BEGIN
           CREATE INDEX dest_purpose_idx    ON HHSurvey.Trip(dest_purpose);
           CREATE INDEX travelers_total_idx ON HHSurvey.Trip(travelers_total);
           CREATE INDEX person_tripnum_idx  ON HHSurvey.Trip(person_id, tripnum);
+          CREATE INDEX person_timestamps   ON HHSurvey.Trip (person_id, depart_time_timestamp, arrival_time_timestamp);
           CREATE SPATIAL INDEX dest_geog_idx   ON HHSurvey.Trip(dest_geog)        USING GEOGRAPHY_AUTO_GRID;
           CREATE SPATIAL INDEX origin_geog_idx ON HHSurvey.Trip(origin_geog)      USING GEOGRAPHY_AUTO_GRID;
           CREATE SPATIAL INDEX home_geog_idx   ON HHSurvey.household(home_geog)   USING GEOGRAPHY_AUTO_GRID;
