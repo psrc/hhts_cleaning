@@ -106,6 +106,7 @@ go
         set (system_versioning = on (history_table = History.HHSurvey__trip_error_flags));
     go
 
+
 -- helper functions
     create FUNCTION dbo.LocalToUtc (@localTime DATETIME2)
     RETURNS DATETIME2
