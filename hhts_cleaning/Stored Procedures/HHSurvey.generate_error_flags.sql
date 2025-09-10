@@ -131,8 +131,9 @@ AS BEGIN
             WHERE DATEDIFF(Second,  t16.depart_time_timestamp, t_next.depart_time_timestamp) < 60 
                 AND  t16.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.brief_purposes) AND t16.dest_purpose NOT in(SELECT flag_value FROM HHSurvey.NullFlags)
 
-        UNION ALL SELECT t17.recid, t17.person_id, t17.tripnum,	       				                        'same dest as prior' AS error_flag
-            FROM trip_ref as t17 WHERE t17.distance_miles = 0
+        UNION ALL SELECT t_next.recid, t_next.person_id, t_next.tripnum,	       				            'same dest as prior' AS error_flag
+            FROM trip_ref as t17 JOIN HHSurvey.Trip AS t_next ON  t17.person_id=t_next.person_id AND t17.tripnum + 1 =t_next.tripnum 
+                AND t17.dest_geog.STDistance(t_next.dest_geog) < 10
 
         UNION ALL (SELECT t18.recid, t18.person_id, t18.tripnum,					         				     	  'time overlap' AS error_flag
             FROM trip_ref AS t18 JOIN HHSurvey.Trip AS compare_t ON  t18.person_id=compare_t.person_id AND  t18.recid <> compare_t.recid
