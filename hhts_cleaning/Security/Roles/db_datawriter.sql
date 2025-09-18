@@ -1,4 +1,6 @@
 
+EXEC sp_addrolemember N'db_datawriter', N'PSRC\MOshanreh'
+
 EXEC sp_addrolemember N'db_datawriter', N'Shiny'
 
 EXEC sp_addrolemember N'db_datawriter', N'Hana'

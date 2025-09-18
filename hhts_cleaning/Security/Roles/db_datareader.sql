@@ -1,4 +1,6 @@
 
+EXEC sp_addrolemember N'db_datareader', N'PSRC\MOshanreh'
+
 EXEC sp_addrolemember N'db_datareader', N'Shiny'
 
 EXEC sp_addrolemember N'db_datareader', N'Hana'

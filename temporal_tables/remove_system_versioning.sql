@@ -56,3 +56,30 @@ go
     DROP PERIOD FOR SYSTEM_TIME;
 
     DROP TABLE History.HHSurvey__trip_error_flags;
+
+-- trip_ingredients_done 
+    ALTER TABLE HHSurvey.trip_ingredients_done 
+    set (system_versioning = OFF);
+
+    ALTER TABLE HHSurvey.trip_ingredients_done 
+    DROP PERIOD FOR SYSTEM_TIME;
+
+    DROP TABLE History.HHSurvey__trip_ingredients_done;
+
+    ALTER TABLE HHSurvey.trip_ingredients_done 
+    drop constraint HHSurvey_trip_ingredients_done_valid_from_default
+    
+    ALTER TABLE HHSurvey.trip_ingredients_done 
+    drop column valid_from
+
+    ALTER TABLE HHSurvey.trip_ingredients_done 
+    drop constraint HHSurvey_trip_ingredients_done_valid_to_default
+
+    ALTER TABLE HHSurvey.trip_ingredients_done 
+    drop column valid_to
+
+    ALTER TABLE HHSurvey.trip_ingredients_done 
+    drop constraint PK_trip_ingredients_done
+
+    ALTER TABLE HHSurvey.trip_ingredients_done 
+    drop  column ingredient_id
