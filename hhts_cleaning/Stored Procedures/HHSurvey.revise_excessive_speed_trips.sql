@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE PROCEDURE [HHSurvey].[revise_excessive_speed_trips] @GoogleKey nvarchar(100)
+CREATE   PROCEDURE [HHSurvey].[revise_excessive_speed_trips] @GoogleKey nvarchar(100)
 AS BEGIN
 
     IF @GoogleKey IS NULL OR LEN(@GoogleKey) < 10
@@ -86,8 +86,8 @@ BEGIN TRY
     JOIN next_batch AS b ON m.tripid = b.tripid
         
         -- Process the marked batch
-        UPDATE #tmpApiMiMin 
-        SET api_result = Elmer.dbo.route_mi_min(origin_geog.Long, origin_geog.Lat, dest_geog.Long, dest_geog.Lat, query_mode, @GoogleKey)
+            UPDATE #tmpApiMiMin 
+            SET api_result = Elmer.dbo.route_mi_min(origin_geog.Long, origin_geog.Lat, dest_geog.Long, dest_geog.Lat, query_mode, @GoogleKey, depart)
         WHERE api_status = 'PROCESSING'
         
         -- Update status based on API result
@@ -130,10 +130,10 @@ BEGIN TRY
     COMMIT TRANSACTION;
 
     BEGIN TRANSACTION;    
-    UPDATE #tmpApiMiMin
-        SET adj = -1, revision_code = CONCAT(revision_code, '13,'), 											          --where walk doesn't fit, try driving
-        tminutes = CAST(Elmer.dbo.rgx_replace(Elmer.dbo.route_mi_min(origin_geog.Long, origin_geog.Lat, dest_geog.Long, dest_geog.Lat,'driving', @GoogleKey),'.*,(.*)$','$1',1) AS float)
-        WHERE query_mode = 'walking' AND adj IS NULL AND DATEDIFF(Minute, depart, arrival)/60.0 < 7;
+        UPDATE #tmpApiMiMin
+            SET adj = -1, revision_code = CONCAT(revision_code, '13,'), 											          --where walk doesn't fit, try driving
+            tminutes = CAST(Elmer.dbo.rgx_replace(Elmer.dbo.route_mi_min(origin_geog.Long, origin_geog.Lat, dest_geog.Long, dest_geog.Lat,'driving', @GoogleKey, depart),'.*,(.*)$','$1',1) AS float)
+            WHERE query_mode = 'walking' AND adj IS NULL AND DATEDIFF(Minute, depart, arrival)/60.0 < 7;
     COMMIT TRANSACTION;
 
     BEGIN TRANSACTION;

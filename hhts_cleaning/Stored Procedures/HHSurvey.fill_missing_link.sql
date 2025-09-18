@@ -31,7 +31,7 @@ BEGIN
 				-- Preserve mode if same across the gap; else unknown/imputed (995)
 				CASE WHEN t.mode_1 = nxt.mode_1 THEN t.mode_1 ELSE 995 END AS mode_imputed,
 				-- Rev code: 16, same-day; 17, cross-day
-				CASE WHEN DATEDIFF(DAY, t.arrival_time_timestamp, nxt.depart_time_timestamp) = 0 THEN '16,' ELSE '17,' END AS revision_code,
+				CASE WHEN DATEDIFF(DAY, t.arrival_time_timestamp, nxt.depart_time_timestamp) = 0 THEN '16a,' ELSE '16b,' END AS revision_code,
 				-- Travel window start/end: prefer the actual observed times; we'll avoid placing in undesirable bands later
 				t.arrival_time_timestamp  AS travelwindow_start,
 				nxt.depart_time_timestamp AS travelwindow_end,
@@ -78,7 +78,8 @@ BEGIN
 						WHEN b.mode_for_route = 1 THEN 'walking' 
 						ELSE 'driving' 
 					END,   
-					@GoogleKey
+					@GoogleKey,
+					NULL
 				) AS mi_min_result
 			FROM pick25 AS b
 		),
