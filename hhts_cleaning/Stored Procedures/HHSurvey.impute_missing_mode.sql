@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE   PROCEDURE [HHSurvey].[impute_missing_mode]
+CREATE    PROCEDURE [HHSurvey].[impute_missing_mode]
     @google_key               nvarchar(256) = NULL,
     @max_api_calls_per_run    int           = 2000,
     @radius_meters            int           = 150,
@@ -24,6 +24,76 @@ Assumptions:
 */
 BEGIN
     SET NOCOUNT ON;
+
+    /* Ensure log table exists for audit output */
+    IF OBJECT_ID('HHSurvey.mode_imputation_log') IS NULL
+    BEGIN
+        CREATE TABLE HHSurvey.mode_imputation_log (
+            log_id            bigint IDENTITY(1,1) PRIMARY KEY,
+            recid             decimal(19,0) NOT NULL,
+            person_id         decimal(19,0) NULL,
+            tripnum           int           NULL,
+            traveldate        date          NULL,
+            method            nvarchar(50)  NOT NULL,
+            confidence        nvarchar(20)  NOT NULL,
+            chosen_family     nvarchar(20)  NULL,
+            chosen_mode_id    int           NULL,
+            -- chosen_mode_label removed per request
+            prev_mode_id      int           NULL,
+            distance_miles    float         NULL,
+            duration_minutes  float         NULL,
+            avg_speed_mph     float         NULL,
+            tour_id           int           NULL,
+            donor_recid       decimal(19,0) NULL,
+            donor_person_id   decimal(19,0) NULL,
+            donor_tripnum     int           NULL,
+            api_driving_min   float         NULL,
+            api_transit_min   float         NULL,
+            api_bicycling_min float         NULL,
+            api_walking_min   float         NULL,
+            api_best_mode     nvarchar(20)  NULL,
+            api_diff_minutes  float         NULL,
+            api_calls_used    int           NULL,
+            notes             nvarchar(max) NULL,
+            created_at        datetime2      NOT NULL CONSTRAINT DF_mode_imp_log_created_at DEFAULT (SYSUTCDATETIME())
+        );
+    END
+    ELSE
+    BEGIN
+        /* Ensure existing table has wide ID column types to avoid int overflows */
+        IF EXISTS (
+            SELECT 1 FROM sys.columns c
+            JOIN sys.types t ON c.user_type_id=t.user_type_id
+            WHERE c.object_id = OBJECT_ID('HHSurvey.mode_imputation_log') AND c.name='recid' AND t.name='int'
+        )
+        BEGIN
+            ALTER TABLE HHSurvey.mode_imputation_log ALTER COLUMN recid decimal(19,0) NOT NULL;
+        END
+        IF EXISTS (
+            SELECT 1 FROM sys.columns c
+            JOIN sys.types t ON c.user_type_id=t.user_type_id
+            WHERE c.object_id = OBJECT_ID('HHSurvey.mode_imputation_log') AND c.name='person_id' AND t.name='int'
+        )
+        BEGIN
+            ALTER TABLE HHSurvey.mode_imputation_log ALTER COLUMN person_id decimal(19,0) NULL;
+        END
+        IF EXISTS (
+            SELECT 1 FROM sys.columns c
+            JOIN sys.types t ON c.user_type_id=t.user_type_id
+            WHERE c.object_id = OBJECT_ID('HHSurvey.mode_imputation_log') AND c.name='donor_recid' AND t.name='int'
+        )
+        BEGIN
+            ALTER TABLE HHSurvey.mode_imputation_log ALTER COLUMN donor_recid decimal(19,0) NULL;
+        END
+        IF EXISTS (
+            SELECT 1 FROM sys.columns c
+            JOIN sys.types t ON c.user_type_id=t.user_type_id
+            WHERE c.object_id = OBJECT_ID('HHSurvey.mode_imputation_log') AND c.name='donor_person_id' AND t.name='int'
+        )
+        BEGIN
+            ALTER TABLE HHSurvey.mode_imputation_log ALTER COLUMN donor_person_id decimal(19,0) NULL;
+        END
+    END
 
     /* Parameters and thresholds */
     DECLARE @walk_max_mi     float = 0.75,
@@ -414,12 +484,12 @@ BEGIN
     /* Staging for decisions */
     IF OBJECT_ID('tempdb..#decisions') IS NOT NULL DROP TABLE #decisions;
     CREATE TABLE #decisions (
-        recid int PRIMARY KEY,
+        recid decimal(19,0) PRIMARY KEY,
         method nvarchar(50) NOT NULL,
         confidence nvarchar(20) NOT NULL,
         family nvarchar(20) NULL,
         chosen_mode int NULL,
-        donor_recid int NULL,
+        donor_recid decimal(19,0) NULL,
         api_driving_min float NULL,
         api_transit_min float NULL,
         api_bicycling_min float NULL,
@@ -434,31 +504,40 @@ BEGIN
     SELECT recid, 'airplane', 'High', 'AIR', 31
     FROM #air_candidates;
 
-    /* Tour consensus where single family (no global gating; allow personal history to dominate) */
-        INSERT INTO #decisions (recid, method, confidence, family, chosen_mode)
-        SELECT w.recid, 'tour-consensus', 'High', td.consensus_family,
-           COALESCE(
-              (SELECT TOP 1 t.mode_1 FROM HHSurvey.Trip t WHERE t.person_id=w.person_id AND CAST(COALESCE(t.traveldate, CAST(t.depart_time_timestamp AS date)) AS date)=w.traveldate AND t.mode_1 IN (SELECT mode_id FROM #known_modes WHERE family=td.consensus_family)
-               GROUP BY t.mode_1 ORDER BY COUNT(*) DESC),
-              (SELECT mode_id FROM #family_defaults WHERE family=td.consensus_family)
-           )
-    FROM #tour_donors td
-        JOIN #work w ON w.person_id=td.person_id AND w.traveldate=td.traveldate AND w.tour_num=td.tour_num
-        WHERE NOT EXISTS (SELECT 1 FROM #decisions d WHERE d.recid=w.recid);
+     /* Tour consensus where single family (no global gating; allow personal history to dominate) */
+          INSERT INTO #decisions (recid, method, confidence, family, chosen_mode)
+          SELECT td.recid, 'tour-consensus', 'High', td.consensus_family,
+              COALESCE(
+                  (SELECT TOP 1 t.mode_1 FROM HHSurvey.Trip t WHERE t.person_id=td.person_id AND CAST(COALESCE(t.traveldate, CAST(t.depart_time_timestamp AS date)) AS date)=td.traveldate AND t.mode_1 IN (SELECT mode_id FROM #known_modes WHERE family=td.consensus_family)
+                    GROUP BY t.mode_1 ORDER BY COUNT(*) DESC),
+                  (SELECT mode_id FROM #family_defaults WHERE family=td.consensus_family)
+              )
+          FROM #tour_donors td
+          WHERE NOT EXISTS (SELECT 1 FROM #decisions d WHERE d.recid=td.recid);
 
-    /* Reverse donor (no global gating) */
+    /* Reverse donor (no global gating) - dedupe to 1 row per target */
+        ;WITH ranked AS (
+            SELECT rd.*, ROW_NUMBER() OVER (PARTITION BY rd.target_recid ORDER BY rd.donor_recid) AS rn
+            FROM #rev_donors rd
+        )
         INSERT INTO #decisions (recid, method, confidence, family, chosen_mode, donor_recid)
-        SELECT rd.target_recid, 'reverse-donor', 'High', km.family, rd.donor_mode, rd.donor_recid
-        FROM #rev_donors rd
-        JOIN #known_modes km ON km.mode_id=rd.donor_mode
-        WHERE NOT EXISTS (SELECT 1 FROM #decisions d WHERE d.recid=rd.target_recid);
+        SELECT r.target_recid, 'reverse-donor', 'High', km.family, r.donor_mode, r.donor_recid
+        FROM ranked r
+        JOIN #known_modes km ON km.mode_id=r.donor_mode
+        WHERE r.rn = 1
+          AND NOT EXISTS (SELECT 1 FROM #decisions d WHERE d.recid=r.target_recid);
 
-    /* Cross-day donor (no global gating) */
+    /* Cross-day donor (no global gating) - dedupe to 1 row per target */
+        ;WITH ranked AS (
+            SELECT cd.*, ROW_NUMBER() OVER (PARTITION BY cd.target_recid ORDER BY cd.donor_recid) AS rn
+            FROM #cross_donors cd
+        )
         INSERT INTO #decisions (recid, method, confidence, family, chosen_mode, donor_recid)
-        SELECT cd.target_recid, 'cross-day', 'Medium', km.family, cd.donor_mode, cd.donor_recid
-        FROM #cross_donors cd
-        JOIN #known_modes km ON km.mode_id=cd.donor_mode
-        WHERE NOT EXISTS (SELECT 1 FROM #decisions d WHERE d.recid=cd.target_recid);
+        SELECT r.target_recid, 'cross-day', 'Medium', km.family, r.donor_mode, r.donor_recid
+        FROM ranked r
+        JOIN #known_modes km ON km.mode_id=r.donor_mode
+        WHERE r.rn = 1
+          AND NOT EXISTS (SELECT 1 FROM #decisions d WHERE d.recid=r.target_recid);
 
     /* Simple fallback when no donors/tour decisions:
        - If slow and short: WALK (<4 mph and <=2 mi)
@@ -514,8 +593,8 @@ BEGIN
     BEGIN
         IF OBJECT_ID('tempdb..#api_queue') IS NOT NULL DROP TABLE #api_queue;
         CREATE TABLE #api_queue (
-            recid int PRIMARY KEY,
-            person_id int,
+            recid decimal(19,0) PRIMARY KEY,
+            person_id decimal(19,0),
             o_lon float, o_lat float, d_lon float, d_lat float,
             duration_min float,
             depart_time_timestamp datetime2 NULL,
@@ -536,7 +615,7 @@ BEGIN
 
         IF OBJECT_ID('tempdb..#api_results') IS NOT NULL DROP TABLE #api_results;
         CREATE TABLE #api_results (
-            recid int PRIMARY KEY,
+            recid decimal(19,0) PRIMARY KEY,
             driving_min float NULL,
             transit_min float NULL,
             bicycling_min float NULL,
@@ -558,7 +637,7 @@ BEGIN
             DECLARE @qcount int = (SELECT COUNT(*) FROM #batch);
 
             /* For each recid in batch, call API for requested modes */
-            DECLARE @recid int, @o_lon float, @o_lat float, @d_lon float, @d_lat float, @dur float, @depart datetime2,
+        DECLARE @recid decimal(19,0), @o_lon float, @o_lat float, @d_lon float, @d_lat float, @dur float, @depart datetime2,
                     @drive bit, @transit bit, @bike bit, @walk bit;
 
             DECLARE c CURSOR LOCAL FAST_FORWARD FOR
@@ -570,20 +649,44 @@ BEGIN
                 DECLARE @drive_min float = NULL, @transit_min float = NULL, @bike_min float = NULL, @walk_min float = NULL;
 
                 IF @drive = 1 BEGIN
-                    SELECT @drive_min = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'driving', @google_key, @depart);
+                    DECLARE @r_driving nvarchar(200), @p_driving int;
+                    SELECT @r_driving = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'driving', @google_key, @depart);
+                    SET @p_driving = CHARINDEX(',', @r_driving);
+                    IF @p_driving > 0
+                        SELECT @drive_min = TRY_CONVERT(float, LTRIM(RTRIM(SUBSTRING(@r_driving, @p_driving+1, 4000))));
+                    ELSE
+                        SELECT @drive_min = TRY_CONVERT(float, @r_driving);
                     SET @calls_used += 1;
                 END
                 IF @transit = 1 AND @calls_used < @max_api_calls_per_run BEGIN
-                    SELECT @transit_min = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'transit', @google_key, @depart);
+                    DECLARE @r_transit nvarchar(200), @p_transit int;
+                    SELECT @r_transit = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'transit', @google_key, @depart);
+                    SET @p_transit = CHARINDEX(',', @r_transit);
+                    IF @p_transit > 0
+                        SELECT @transit_min = TRY_CONVERT(float, LTRIM(RTRIM(SUBSTRING(@r_transit, @p_transit+1, 4000))));
+                    ELSE
+                        SELECT @transit_min = TRY_CONVERT(float, @r_transit);
                     SET @calls_used += 1;
                 END
                 IF @bike = 1 AND @calls_used < @max_api_calls_per_run BEGIN
                     -- Skip biking if distance obviously too long: rely on queue prefilter; still allow
-                    SELECT @bike_min = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'bicycling', @google_key, @depart);
+                    DECLARE @r_bike nvarchar(200), @p_bike int;
+                    SELECT @r_bike = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'bicycling', @google_key, @depart);
+                    SET @p_bike = CHARINDEX(',', @r_bike);
+                    IF @p_bike > 0
+                        SELECT @bike_min = TRY_CONVERT(float, LTRIM(RTRIM(SUBSTRING(@r_bike, @p_bike+1, 4000))));
+                    ELSE
+                        SELECT @bike_min = TRY_CONVERT(float, @r_bike);
                     SET @calls_used += 1;
                 END
                 IF @walk = 1 AND @calls_used < @max_api_calls_per_run BEGIN
-                    SELECT @walk_min = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'walking', @google_key, @depart);
+                    DECLARE @r_walk nvarchar(200), @p_walk int;
+                    SELECT @r_walk = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'walking', @google_key, @depart);
+                    SET @p_walk = CHARINDEX(',', @r_walk);
+                    IF @p_walk > 0
+                        SELECT @walk_min = TRY_CONVERT(float, LTRIM(RTRIM(SUBSTRING(@r_walk, @p_walk+1, 4000))));
+                    ELSE
+                        SELECT @walk_min = TRY_CONVERT(float, @r_walk);
                     SET @calls_used += 1;
                 END
 
@@ -594,7 +697,7 @@ BEGIN
                 WAITFOR DELAY '00:00:00.025';
 
                 SET @dcount += 1;
-                FETCH NEXT FROM c INTO @recid, @o_lon, @o_lat, @d_lon, @d_lat, @dur, @drive, @transit, @bike, @walk;
+                FETCH NEXT FROM c INTO @recid, @o_lon, @o_lat, @d_lon, @d_lat, @dur, @depart, @drive, @transit, @bike, @walk;
             END
             CLOSE c; DEALLOCATE c;
 
@@ -649,16 +752,16 @@ BEGIN
                d.api_driving_min, d.api_transit_min, d.api_bicycling_min, d.api_walking_min, d.api_best_mode, d.api_diff_minutes, d.api_calls_used
         FROM #decisions d
     )
-        INSERT INTO HHSurvey.mode_imputation_log (
-        recid, person_id, tripnum, traveldate,
-        method, confidence, chosen_family, chosen_mode_id, chosen_mode_label,
-        prev_mode_id, distance_miles, duration_minutes, avg_speed_mph, tour_id,
-        donor_recid, donor_person_id, donor_tripnum,
-        api_driving_min, api_transit_min, api_bicycling_min, api_walking_min,
-                api_best_mode, api_diff_minutes, api_calls_used, notes
+    INSERT INTO HHSurvey.mode_imputation_log (
+    recid, person_id, tripnum, traveldate,
+    method, confidence, chosen_family, chosen_mode_id,
+    prev_mode_id, distance_miles, duration_minutes, avg_speed_mph, tour_id,
+    donor_recid, donor_person_id, donor_tripnum,
+    api_driving_min, api_transit_min, api_bicycling_min, api_walking_min,
+        api_best_mode, api_diff_minutes, api_calls_used, notes
     )
-        SELECT w.recid, w.person_id, w.tripnum, w.traveldate,
-           c.method, c.confidence, c.family, c.chosen_mode, vl.label,
+    SELECT w.recid, w.person_id, w.tripnum, w.traveldate,
+       c.method, c.confidence, c.family, c.chosen_mode,
            t.mode_1, w.distance_miles, w.duration_min, w.mph, w.tour_num,
            c.donor_recid, td.person_id, td.tripnum,
            c.api_driving_min, c.api_transit_min, c.api_bicycling_min, c.api_walking_min,
@@ -679,8 +782,7 @@ BEGIN
     JOIN #work w ON w.recid=c.recid
     JOIN HHSurvey.Trip t ON t.recid=w.recid
         LEFT JOIN #compatibility comp ON comp.recid=w.recid
-    LEFT JOIN HHSurvey.Trip td ON td.recid=c.donor_recid
-    LEFT JOIN [HouseholdTravelSurvey2025].[dbo].[value_labels] vl ON vl.value=c.chosen_mode AND vl.variable='mode_1' AND vl.[table]='trip_unlinked';
+    LEFT JOIN HHSurvey.Trip td ON td.recid=c.donor_recid;
 
     IF @dry_run = 0
     BEGIN
