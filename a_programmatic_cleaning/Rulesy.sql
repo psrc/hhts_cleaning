@@ -11,7 +11,7 @@ GO
 SET QUOTED_IDENTIFIER ON
 GO
 
-DECLARE @BingKey nvarchar = ['use your Bing API key here']
+DECLARE @GoogleKey nvarchar = '<insert Google API key>']
 
 	--Create mode uber-categories for access/egress characterization, etc.
 		DROP TABLE IF EXISTS 
@@ -78,21 +78,22 @@ DECLARE @BingKey nvarchar = ['use your Bing API key here']
 	EXECUTE HHSurvey.initial_origin_purpose;                    -- Origin purpose assignment: Assumes purpose codes: 1 (home) and 10 (primary work)
 	EXECUTE HHSurvey.dest_purpose_updates;                      -- Destination purpose revisions (extensive)
 
-/* STEP 4. Revise travel times (and where necessary, mode) */  
-	EXECUTE HHSurvey.revise_excessive_speed_trips @GoogleKey = 'AIzaSyDUFEM3ItKeuOWH9nc0XZN15tX_PFBKaFU';     -- Change departure or arrival times for records that would qualify for 'excessive speed' flag
-
+/* STEP 4. Imputations */  
+	EXECUTE HHSurvey.revise_excessive_speed_trips @GoogleKey;   -- Change departure or arrival times for records that would qualify for 'excessive speed' flag
+	EXECUTE HHSurvey.fill_missing_link @GoogleKey;              -- Inserts a bridge trip where discontinuity exists (e.g. the App was turned off)
+	EXECUTE HHSurvey.impute_purpose_from_location @GoogleKey;   -- Nominatim; utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
+	EXECUTE HHSurvey.impute_purpose_from_location @GoogleKey;   -- Google Places; utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
+	EXECUTE HHSurvey.impute_missing_mode @GoogleKey, @dry_run=0; -- Utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
+			 			 
 /* STEP 5.	Trip linking */ 
 	EXECUTE HHSurvey.link_trips_systemically;                   -- Executes trip linking. Can be called from Fixie for edited trips
 
-/* Step 6. Impute missing purpose for cases that can be assumed by location */
-	EXECUTE HHSurvey.impute_purpose_from_location @GoogleKey = 'AIzaSyDUFEM3ItKeuOWH9nc0XZN15tX_PFBKaFU';     -- Utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
-			 
-/* STEP 7. Harmonize trips where possible: add trips for non-reporting cotravelers, missing trips between destinations, and remove duplicates  */
+/* STEP 7. Harmonize trips where possible */
 	--FYI HHSurvey.insert_silent_passenger_trips exists but intentionally is NOT used; RSG is also doing something on this issue.
-	EXECUTE HHSurvey.fill_missing_link;                         -- Inserts a bridge trip where discontinuity exists (e.g. the App was turned off)
 	EXECUTE HHSurvey.fix_mistaken_passenger_carryovers;         -- When 'driver' code or work purpose are attributed to accompanying passengers
 	EXECUTE HHSurvey.trip_removals;                             -- Creates removed_trip table & removes duplicated 'go home' trips created by rMove
 	EXECUTE HHSurvey.cleanup_trips;	                            -- Snap origin points to prior destination, when proximate
+	EXECUTE HHSurvey.recalculate_after_edit;
 
 /* STEP 8. Flag inconsistencies */
 /*	as additional error patterns behind these flags are identified, rules to correct them can be added to Step 3 or elsewhere in Rulesy as makes sense.*/
