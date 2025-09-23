@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE   PROCEDURE [HHSurvey].[link_trips_systemically]
+CREATE    PROCEDURE [HHSurvey].[link_trips_systemically]
 AS BEGIN
 
     DECLARE @trip_ingredients_input HHSurvey.TripIngredientType;
@@ -58,17 +58,20 @@ AS BEGIN
         AND ((t.origin_geog.STEquals(prev_t.origin_geog)=1 AND t.dest_geog.STEquals(prev_t.dest_geog)=1)
         OR (t.origin_geog.STEquals(t.dest_geog)=1)) AND t.dest_purpose=prev_t.dest_purpose;
 
-    -- remove component records into separate table, starting w/ 2nd component (i.e., first is left in trip table).  The criteria here determine which get considered components.
-    DROP TABLE IF EXISTS HHSurvey.trip_ingredients_done;
-    COMMIT TRANSACTION;
+    -- Ensure the component archive table exists; preserve existing records across reruns
+    -- The criteria below determine which get considered components.
+    COMMIT TRANSACTION
 
     BEGIN TRANSACTION;
-    SELECT TOP 0 HHSurvey.Trip.*, CAST(0 AS int) AS trip_link 
-        INTO HHSurvey.trip_ingredients_done 
-        FROM HHSurvey.Trip
-    union all -- This union is done simply for the side effect of preventing the recid in the new table to be defined as an IDENTITY column.
-    SELECT TOP 0 HHSurvey.Trip.*, CAST(0 AS int) AS trip_link 
-        FROM HHSurvey.Trip
+    IF OBJECT_ID(N'HHSurvey.trip_ingredients_done', N'U') IS NULL
+    BEGIN
+        SELECT TOP 0 HHSurvey.Trip.*, CAST(0 AS int) AS trip_link 
+            INTO HHSurvey.trip_ingredients_done 
+            FROM HHSurvey.Trip
+        UNION ALL -- Prevent recid from becoming IDENTITY by forcing UNION ALL side effect
+        SELECT TOP 0 HHSurvey.Trip.*, CAST(0 AS int) AS trip_link 
+            FROM HHSurvey.Trip
+    END
     COMMIT TRANSACTION;
 
     --select the trip ingredients that will be linked; this selects all but the first component 

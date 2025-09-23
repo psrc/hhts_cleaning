@@ -3,7 +3,7 @@ GO
 SET ANSI_NULLS ON
 GO
 
-CREATE   PROCEDURE [HHSurvey].[link_trips]
+CREATE    PROCEDURE [HHSurvey].[link_trips]
     @trip_ingredients HHSurvey.TripIngredientType READONLY
 AS
 BEGIN
@@ -79,7 +79,8 @@ BEGIN
 
     IF NOT EXISTS (SELECT 1 FROM #linked_trips)
     BEGIN
-        THROW 50001, 'All linked trips were filtered out because they would return to the same location, result in a looped purpose, or speed suggests a stop.', 1;
+        PRINT 'HHSurvey.link_trips: No linkable trips found (all candidates were filtered out); no changes made.';
+        RETURN; -- No-op when nothing to link
     END;
 
     -- Collect affected people for scoping downstream operations
