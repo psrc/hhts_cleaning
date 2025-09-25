@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE    PROCEDURE [HHSurvey].[generate_error_flags] 
+CREATE   PROCEDURE [HHSurvey].[generate_error_flags] 
     @target_person_id decimal = NULL --If missing, generated for all records
 AS BEGIN
     SET NOCOUNT ON
@@ -190,7 +190,7 @@ AS BEGIN
                             CASE WHEN t_next.recid IS NULL 
                                     THEN DATETIME2FROMPARTS(DATEPART(year, t24.arrival_time_timestamp),DATEPART(month, t24.arrival_time_timestamp),DATEPART(day, t24.arrival_time_timestamp),3,0,0,0,0) 
                                     ELSE t_next.depart_time_timestamp END) > 480)
-                    OR  (t24.dest_purpose IN (SELECT purpose_id FROM HHSurvey.PUDO_purposes) 	
+                    OR  (t24.dest_purpose IN (45, 46, 48) 	
                     AND DATEDIFF(Minute, t24.arrival_time_timestamp, 
                             CASE WHEN t_next.recid IS NULL 
                                     THEN DATETIME2FROMPARTS(DATEPART(year, t24.arrival_time_timestamp),DATEPART(month, t24.arrival_time_timestamp),DATEPART(day, t24.arrival_time_timestamp),3,0,0,0,0) 
