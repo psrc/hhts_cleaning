@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE    PROCEDURE [HHSurvey].[link_trips_systemically]
+CREATE   PROCEDURE [HHSurvey].[link_trips_systemically]
 AS BEGIN
 
     DECLARE @trip_ingredients_input HHSurvey.TripIngredientType;
@@ -54,7 +54,7 @@ AS BEGIN
     FROM HHSurvey.Trip AS t 
     LEFT JOIN HHSurvey.Trip AS prev_t ON t.person_id=prev_t.person_id AND t.tripnum - 1 = prev_t.tripnum
     LEFT JOIN HHSurvey.Trip AS next_t ON t.person_id=next_t.person_id AND t.tripnum + 1 = next_t.tripnum
-    WHERE t.depart_time_timestamp=t.arrival_time_timestamp 
+    WHERE t.depart_time_timestamp=t.arrival_time_timestamp
         AND ((t.origin_geog.STEquals(prev_t.origin_geog)=1 AND t.dest_geog.STEquals(prev_t.dest_geog)=1)
         OR (t.origin_geog.STEquals(t.dest_geog)=1)) AND t.dest_purpose=prev_t.dest_purpose;
 
@@ -137,7 +137,9 @@ AS BEGIN
             (trip.origin_geog.STEquals(next_trip.origin_geog)=1 AND trip.dest_geog.STEquals(next_trip.dest_geog)=1) OR-- coordinates identical to prior (denotes RSG-split trip components)	
         (trip.dest_purpose = 60 AND DATEDIFF(Minute, trip.arrival_time_timestamp, next_trip.depart_time_timestamp) < 45)) -- change mode purpose, max 45min dwell (relaxed from 2021)
         OR (trip.travelers_total = next_trip.travelers_total	 												      -- traveler # the same
-        AND trip.dest_purpose = next_trip.dest_purpose AND trip.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.PUDO_purposes) -- purpose allows for linking												
+    AND trip.dest_purpose = next_trip.dest_purpose 
+    AND trip.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.PUDO_purposes) -- purpose allows for linking (excludes PUDO purposes)
+    AND trip.dest_purpose <> 51 -- prevent linking purely recreational/exercise segments when purposes match
         AND (trip.mode_1<>next_trip.mode_1 OR trip.mode_1 IN(SELECT flag_value FROM HHSurvey.NullFlags) OR trip.mode_1 IN(SELECT mode_id FROM HHSurvey.transitmodes)) --either change modes or switch transit lines                     
         AND DATEDIFF(Minute, trip.arrival_time_timestamp, next_trip.depart_time_timestamp) < 15);                 -- under 15min dwell
     COMMIT TRANSACTION;
