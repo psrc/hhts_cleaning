@@ -2,274 +2,431 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-/* Add trips in cases the origin of a trip is over 500m from the destination of the prior, with conditions */
-
-CREATE    PROCEDURE [HHSurvey].[fill_missing_link]
-	@GoogleKey NVARCHAR(100)
+/*
+Purpose: Enhanced gap filling procedure.
+Strategy order:
+ 1. Household donor replication (preferred)
+ 2. Impute single bridging trip (sample dwell + routed travel) if no donor
+Skip only when routing fails (no distance/minutes returned).
+Revisions vs legacy:
+ - No min dwell or jitter params; dwell sampled from distribution.
+ - Home (dest_purpose=1) dwells stratified by overnight crossing 3am.
+ - Center trip in window if sampled dwell + travel exceeds window slack.
+*/
+CREATE   PROCEDURE [HHSurvey].[fill_missing_link]
+  @GoogleKey NVARCHAR(100),
+  @Debug BIT = 0,
+  @Seed  BIGINT = NULL -- optional deterministic randomness
 AS
 BEGIN
+  SET NOCOUNT ON;
+  BEGIN TRY
 
-	-- Ensure trip numbers are current before evaluating gaps
-	EXECUTE HHSurvey.tripnum_update;
+    /* 0. Preparation */
+    EXEC HHSurvey.tripnum_update; -- ensure sequential
 
-	-- Build a prefiltered worklist to minimize routing API calls
-	IF OBJECT_ID('tempdb..#worklist') IS NOT NULL DROP TABLE #worklist;
+    /* 1. Identify gaps */
+    IF OBJECT_ID('tempdb..#gaps') IS NOT NULL DROP TABLE #gaps;
+    ;WITH pairings AS (
+      SELECT 
+        t.recid AS prior_recid,
+        t.person_id,
+        t.hhid,
+        t.pernum,
+        t.arrival_time_timestamp AS gap_start_time,
+        t.dest_geog AS gap_start_geog,
+        t.dest_lat  AS gap_start_lat,
+        t.dest_lng  AS gap_start_lng,
+        nxt.recid AS next_recid,
+        nxt.depart_time_timestamp AS gap_end_time,
+        nxt.origin_geog AS gap_end_geog,
+        nxt.origin_lat  AS gap_end_lat,
+        nxt.origin_lng  AS gap_end_lng,
+        t.dest_geog.STDistance(nxt.origin_geog) AS gap_meters,
+        DATEDIFF(MINUTE, t.arrival_time_timestamp, nxt.depart_time_timestamp) AS window_minutes,
+        t.mode_1 AS prior_mode,
+        nxt.mode_1 AS next_mode
+      FROM HHSurvey.Trip t WITH (NOLOCK)
+      JOIN HHSurvey.Trip nxt WITH (NOLOCK)
+        ON nxt.person_id = t.person_id AND nxt.tripnum = t.tripnum + 1
+      WHERE COALESCE(t.psrc_inserted,0) = 0
+        AND COALESCE(nxt.psrc_inserted,0) = 0
+        AND t.dest_geog IS NOT NULL AND nxt.origin_geog IS NOT NULL
+        AND t.dest_geog.STDistance(nxt.origin_geog) > 500
+        AND NOT EXISTS (
+          SELECT 1 FROM HHSurvey.Trip x WITH (NOLOCK)
+          WHERE x.person_id = t.person_id
+            AND x.psrc_inserted = 1 AND x.dest_purpose = -9998
+            AND x.depart_time_timestamp >= t.arrival_time_timestamp
+            AND x.arrival_time_timestamp <= nxt.depart_time_timestamp
+            AND x.origin_geog.STDistance(t.dest_geog) < 100
+            AND x.dest_geog.STDistance(nxt.origin_geog) < 100
+        )
+    )
+    SELECT 
+      ROW_NUMBER() OVER (ORDER BY person_id, gap_start_time) AS gap_id,
+      * ,
+      CASE WHEN prior_mode = next_mode THEN prior_mode ELSE 995 END AS mode_imputed,
+      0 AS status -- 0=pending 1=donor 2=imputed 3=skipped
+    INTO #gaps
+    FROM pairings;
 
-	WITH base_candidates AS (
-		SELECT 
-			t.recid,
-			t.hhid,
-			t.person_id,
-			t.pernum,
-			t.dest_lat AS gap_origin_lat,
-			t.dest_lng AS gap_origin_lng,
-			t.dest_geog AS gap_origin_geog,
-			nxt.origin_lat AS gap_dest_lat,
-			nxt.origin_lng AS gap_dest_lng,
-			nxt.origin_geog AS gap_dest_geog,
-			-- Preserve mode if same across the gap; else unknown/imputed (995)
-			CASE WHEN t.mode_1 = nxt.mode_1 THEN t.mode_1 ELSE 995 END AS mode_imputed,
-			-- Rev code: 16, same-day; 17, cross-day
-			CASE WHEN DATEDIFF(DAY, t.arrival_time_timestamp, nxt.depart_time_timestamp) = 0 THEN '16a,' ELSE '16b,' END AS revision_code,
-			-- Travel window start/end
-			t.arrival_time_timestamp  AS travelwindow_start,
-			nxt.depart_time_timestamp AS travelwindow_end,
-			-- Traveler counts: carry if consistent, else unknowns
-			CASE WHEN t.travelers_hh     = nxt.travelers_hh     THEN t.travelers_hh     ELSE -9997 END AS travelers_hh,
-			CASE WHEN t.travelers_nonhh  = nxt.travelers_nonhh  THEN t.travelers_nonhh  ELSE -9997 END AS travelers_nonhh,
-			CASE WHEN t.travelers_total  = nxt.travelers_total  THEN t.travelers_total  ELSE -9997 END AS travelers_total,
-			-- For routing mode selection
-			t.mode_1 AS mode_for_route,
-			-- Straight-line gap and naive feasibility
-			t.dest_geog.STDistance(nxt.origin_geog) AS gap_meters,
-			(t.dest_geog.STDistance(nxt.origin_geog) * 0.000621371) AS gap_miles,
-			DATEDIFF(MINUTE, t.arrival_time_timestamp, nxt.depart_time_timestamp) AS window_minutes,
-			CASE 
-				WHEN EXISTS (SELECT 1 FROM HHSurvey.automodes WITH (NOLOCK)    WHERE mode_id = t.mode_1) THEN 25
-				WHEN EXISTS (SELECT 1 FROM HHSurvey.transitmodes WITH (NOLOCK) WHERE mode_id = t.mode_1) THEN 12
-				WHEN EXISTS (SELECT 1 FROM HHSurvey.bikemodes WITH (NOLOCK)    WHERE mode_id = t.mode_1) THEN 10
-				WHEN t.mode_1 = 1 THEN 3
-				ELSE 25
-			END AS naive_speed_mph
-		FROM HHSurvey.Trip AS t WITH (NOLOCK)
-		JOIN HHSurvey.Trip AS nxt WITH (NOLOCK)
-			ON nxt.person_id = t.person_id AND nxt.tripnum = t.tripnum + 1
-		WHERE 
-			COALESCE(t.psrc_inserted, 0) = 0 AND COALESCE(nxt.psrc_inserted, 0) = 0
-			AND t.dest_geog IS NOT NULL AND nxt.origin_geog IS NOT NULL
-			AND t.dest_geog.STDistance(nxt.origin_geog) > 500
-			AND NOT EXISTS (
-				SELECT 1 
-				FROM HHSurvey.Trip AS x WITH (NOLOCK)
-				WHERE x.person_id = t.person_id
-				  AND x.psrc_inserted = 1
-				  AND x.dest_purpose = -9998
-				  AND x.depart_time_timestamp >= t.arrival_time_timestamp
-				  AND x.arrival_time_timestamp <= nxt.depart_time_timestamp
-				  AND x.origin_geog.STDistance(t.dest_geog) < 100
-				  AND x.dest_geog.STDistance(nxt.origin_geog) < 100
-			)
-	),
-	prefilter AS (
-		SELECT 
-			b.*,
-			CEILING((b.gap_miles / NULLIF(b.naive_speed_mph,0)) * 60.0) + 5 AS naive_min_minutes,
-			DATEDIFF(MINUTE, b.travelwindow_start, b.travelwindow_end) - (CEILING((b.gap_miles / NULLIF(b.naive_speed_mph,0)) * 60.0) + 5) AS slack_minutes
-		FROM base_candidates b
-	)
-	SELECT 
-		recid, hhid, person_id, pernum,
-		gap_origin_lat, gap_origin_lng, gap_origin_geog,
-		gap_dest_lat, gap_dest_lng, gap_dest_geog,
-		mode_imputed, revision_code,
-		travelers_hh, travelers_nonhh, travelers_total,
-		travelwindow_start, travelwindow_end,
-		mode_for_route, gap_miles, slack_minutes
-	INTO #worklist
-	FROM prefilter
-	WHERE naive_min_minutes IS NOT NULL
-		AND DATEDIFF(MINUTE, travelwindow_start, travelwindow_end) >= naive_min_minutes
-		AND gap_miles <= 50.0;
+    IF @Debug=1 SELECT * FROM #gaps;
+  IF NOT EXISTS (SELECT 1 FROM #gaps) GOTO finalize;
 
-	-- Nothing to do
-	IF NOT EXISTS (SELECT 1 FROM #worklist) GOTO done;
+    /* 2. Household donor search */
+    IF OBJECT_ID('tempdb..#donor_candidates') IS NOT NULL DROP TABLE #donor_candidates;
+    /* Candidate donor events: build simplified timeline of other household members */
+    SELECT 
+      g.gap_id,
+      g.hhid,
+      g.person_id AS recipient_person_id,
+      m.person_id AS donor_person_id,
+      t.recid,
+      t.tripnum,
+      t.depart_time_timestamp,
+      t.arrival_time_timestamp,
+      t.origin_geog,
+      t.dest_geog,
+      g.gap_start_time,
+      g.gap_end_time,
+      t.origin_geog.STDistance(g.gap_start_geog) AS o_dist_start,
+      t.dest_geog.STDistance(g.gap_start_geog) AS d_dist_start,
+      t.origin_geog.STDistance(g.gap_end_geog)   AS o_dist_end,
+      t.dest_geog.STDistance(g.gap_end_geog)     AS d_dist_end
+    INTO #donor_candidates
+    FROM #gaps g
+    JOIN HHSurvey.Trip t WITH (NOLOCK) ON t.hhid = g.hhid AND t.person_id <> g.person_id
+    JOIN HHSurvey.person m WITH (NOLOCK) ON m.person_id = t.person_id
+    WHERE g.status = 0
+      AND COALESCE(t.psrc_inserted,0) = 0
+      AND t.arrival_time_timestamp IS NOT NULL AND t.depart_time_timestamp IS NOT NULL
+      -- Strictly within window (no outside-of-window donor trips copied)
+      AND t.depart_time_timestamp >= g.gap_start_time
+      AND t.arrival_time_timestamp <= g.gap_end_time;
 
-	-- Process in batches of 25; always advance the worklist regardless of insert count
-	WHILE EXISTS (SELECT 1 FROM #worklist)
-	BEGIN
-		IF OBJECT_ID('tempdb..#batch25') IS NOT NULL DROP TABLE #batch25;
-		SELECT TOP (25) *
-		INTO #batch25
-		FROM #worklist
-		ORDER BY slack_minutes DESC, gap_miles ASC, person_id, recid;
+    /* Identify donors whose sequence spans the entire window with spatial anchors near both endpoints */
+    ;WITH anchors AS (
+      SELECT dc.*, 
+        CASE WHEN dc.d_dist_start < 150 OR dc.o_dist_start < 150 THEN 1 ELSE 0 END AS start_anchor_flag,
+        CASE WHEN dc.o_dist_end   < 150 OR dc.d_dist_end   < 150 THEN 1 ELSE 0 END AS end_anchor_flag
+      FROM #donor_candidates dc
+    ), anchor_bounds AS (
+      SELECT gap_id, donor_person_id,
+        MIN(CASE WHEN start_anchor_flag=1 THEN depart_time_timestamp END) AS earliest_start_anchor_depart,
+        MAX(CASE WHEN end_anchor_flag=1   THEN arrival_time_timestamp END) AS latest_end_anchor_arrive
+      FROM anchors
+      GROUP BY gap_id, donor_person_id
+    ), span_eval AS (
+      SELECT a.gap_id, a.donor_person_id,
+        ab.earliest_start_anchor_depart AS first_depart,
+        ab.latest_end_anchor_arrive     AS last_arrive,
+        CASE WHEN ab.earliest_start_anchor_depart IS NOT NULL THEN 1 ELSE 0 END AS has_start_anchor,
+        CASE WHEN ab.latest_end_anchor_arrive     IS NOT NULL THEN 1 ELSE 0 END AS has_end_anchor,
+        COUNT(DISTINCT a.recid) AS trip_count,
+        SUM(CASE WHEN a.depart_time_timestamp BETWEEN ab.earliest_start_anchor_depart AND ab.latest_end_anchor_arrive THEN 1 ELSE 0 END) AS trips_in_span
+      FROM anchors a
+      JOIN anchor_bounds ab ON ab.gap_id=a.gap_id AND ab.donor_person_id=a.donor_person_id
+      GROUP BY a.gap_id, a.donor_person_id, ab.earliest_start_anchor_depart, ab.latest_end_anchor_arrive
+    ), qualified AS (
+      SELECT s.*, (s.trips_in_span) AS span_trip_count
+      FROM span_eval s
+      JOIN #gaps g ON g.gap_id = s.gap_id
+      WHERE has_start_anchor=1 AND has_end_anchor=1
+        AND s.first_depart >= g.gap_start_time
+        AND s.last_arrive  <= g.gap_end_time
+    ), ranked AS (
+      SELECT q.*, ROW_NUMBER() OVER (PARTITION BY q.gap_id ORDER BY q.span_trip_count ASC, NEWID()) AS rnk
+      FROM qualified q
+    )
+    SELECT * INTO #selected_donors FROM ranked WHERE rnk=1;
 
-		;WITH cte_ref AS (
-			SELECT 
-				b.*,
-				-- Midpoint of the window for time-dependent routing (e.g., transit)
-				DATEADD(MINUTE, DATEDIFF(MINUTE, b.travelwindow_start, b.travelwindow_end) / 2, b.travelwindow_start) AS mid_time,
-				Elmer.dbo.route_mi_min(
-					b.gap_origin_lng, b.gap_origin_lat, 
-					b.gap_dest_lng,   b.gap_dest_lat,
-					CASE 
-						WHEN EXISTS (SELECT 1 FROM HHSurvey.automodes WITH (NOLOCK)    WHERE mode_id = b.mode_for_route) THEN 'driving' 
-						WHEN EXISTS (SELECT 1 FROM HHSurvey.transitmodes WITH (NOLOCK) WHERE mode_id = b.mode_for_route) THEN 'transit'
-						WHEN EXISTS (SELECT 1 FROM HHSurvey.bikemodes WITH (NOLOCK)    WHERE mode_id = b.mode_for_route) THEN 'bicycling'
-						WHEN b.mode_for_route = 1 THEN 'walking' 
-						ELSE 'driving' 
-					END,   
-					@GoogleKey,
-					DATEADD(MINUTE, DATEDIFF(MINUTE, b.travelwindow_start, b.travelwindow_end) / 2, b.travelwindow_start)
-				) AS mi_min_result
-			FROM #batch25 AS b
-		),
-		parsed AS (
-			SELECT r.*, CHARINDEX(',', r.mi_min_result) AS comma_pos
-			FROM cte_ref AS r
-			WHERE r.mi_min_result IS NOT NULL
-		),
-		aml AS (
-			SELECT 
-				p.recid,
-				TRY_CONVERT(float, LEFT(p.mi_min_result, p.comma_pos - 1)) AS distance_mi,
-				TRY_CONVERT(float, SUBSTRING(p.mi_min_result, p.comma_pos + 1, LEN(p.mi_min_result))) AS travel_minutes
-			FROM parsed AS p
-			WHERE p.comma_pos > 1
-		),
-		feasible AS (
-			SELECT 
-				r.recid,
-				r.hhid,
-				r.person_id,
-				r.pernum,
-				r.gap_origin_lat,
-				r.gap_origin_lng,
-				r.gap_origin_geog,
-				r.gap_dest_lat,
-				r.gap_dest_lng,
-				r.gap_dest_geog,
-				r.mode_imputed,
-				r.revision_code,
-				r.travelers_hh,
-				r.travelers_nonhh,
-				r.travelers_total,
-				CAST(r.travelwindow_start AS datetime2) AS window_start,
-				CAST(r.travelwindow_end   AS datetime2) AS window_end,
-				a.distance_mi,
-				TRY_CONVERT(int, ROUND(a.travel_minutes, 0)) AS travel_minutes
-			FROM cte_ref AS r
-			JOIN aml AS a ON a.recid = r.recid
-			WHERE a.distance_mi IS NOT NULL AND a.distance_mi > 0.3
-		),
-		windowed AS (
-			SELECT 
-				f.*,
-				f.window_start AS earliest_depart,
-				DATEADD(MINUTE, -ISNULL(f.travel_minutes, 0), f.window_end) AS latest_depart
-			FROM feasible AS f
-			WHERE DATEDIFF(MINUTE, f.window_start, f.window_end) > ISNULL(f.travel_minutes, 0)
-		),
-		placed AS (
-			SELECT 
-				w.*,
-				DATETIME2FROMPARTS(DATEPART(year, w.window_start), DATEPART(month, w.window_start), DATEPART(day, w.window_start), 5, 30, 0, 0, 0) AS band1_start,
-				DATETIME2FROMPARTS(DATEPART(year, w.window_start), DATEPART(month, w.window_start), DATEPART(day, w.window_start), 22, 30, 0, 0, 0) AS band1_end,
-				DATETIME2FROMPARTS(DATEPART(year, w.window_end),   DATEPART(month, w.window_end),   DATEPART(day, w.window_end),   5, 30, 0, 0, 0) AS band2_start,
-				DATETIME2FROMPARTS(DATEPART(year, w.window_end),   DATEPART(month, w.window_end),   DATEPART(day, w.window_end),   22, 30, 0, 0, 0) AS band2_end
-			FROM windowed AS w
-		),
-		candidates AS (
-			SELECT 
-				p.*,
-				CASE 
-					WHEN (CASE WHEN p.earliest_depart > p.band1_start THEN p.earliest_depart ELSE p.band1_start END)
-					   <= (CASE WHEN p.latest_depart   < p.band1_end   THEN p.latest_depart   ELSE p.band1_end   END)
-					THEN (CASE WHEN p.earliest_depart > p.band1_start THEN p.earliest_depart ELSE p.band1_start END)
-				END AS cand1_depart,
-				CASE 
-					WHEN (CASE WHEN p.earliest_depart > p.band2_start THEN p.earliest_depart ELSE p.band2_start END)
-					   <= (CASE WHEN p.latest_depart   < p.band2_end   THEN p.latest_depart   ELSE p.band2_end   END)
-					THEN (CASE WHEN p.earliest_depart > p.band2_start THEN p.earliest_depart ELSE p.band2_start END)
-				END AS cand2_depart,
-				DATEADD(MINUTE, DATEDIFF(MINUTE, p.earliest_depart, p.latest_depart) / 2, p.earliest_depart) AS center_depart
-			FROM placed AS p
-		),
-		final_pick AS (
-			SELECT 
-				c.*,
-				DATETIME2FROMPARTS(DATEPART(year, c.center_depart), DATEPART(month, c.center_depart), DATEPART(day, c.center_depart), 0, 30, 0, 0, 0) AS bad_start,
-				DATETIME2FROMPARTS(DATEPART(year, c.center_depart), DATEPART(month, c.center_depart), DATEPART(day, c.center_depart), 4, 30, 0, 0, 0) AS bad_end,
-				DATETIME2FROMPARTS(DATEPART(year, c.center_depart), DATEPART(month, c.center_depart), DATEPART(day, c.center_depart), 3, 0, 0, 0, 0) AS three_am,
-				DATETIME2FROMPARTS(DATEPART(year, c.center_depart), DATEPART(month, c.center_depart), DATEPART(day, c.center_depart), 5, 30, 0, 0, 0) AS five30,
-				DATETIME2FROMPARTS(DATEPART(year, c.center_depart), DATEPART(month, c.center_depart), DATEPART(day, c.center_depart), 22, 0, 0, 0, 0) AS ten_pm
-			FROM candidates AS c
-		),
-		choose_time AS (
-			SELECT 
-				f.*,
-				CASE 
-					WHEN f.cand1_depart IS NOT NULL THEN f.cand1_depart
-					WHEN f.cand2_depart IS NOT NULL THEN f.cand2_depart
-					ELSE 
-						CASE 
-							WHEN (f.center_depart BETWEEN f.bad_start AND f.bad_end)
-								 OR (f.center_depart < f.three_am AND DATEADD(MINUTE, ISNULL(f.travel_minutes,0), f.center_depart) >= f.three_am)
-							THEN 
-								CASE 
-									WHEN (CASE WHEN f.earliest_depart > f.five30 THEN f.earliest_depart ELSE f.five30 END) <= f.latest_depart 
-										THEN (CASE WHEN f.earliest_depart > f.five30 THEN f.earliest_depart ELSE f.five30 END)
-									WHEN f.earliest_depart <= (CASE WHEN f.latest_depart < f.ten_pm THEN f.latest_depart ELSE f.ten_pm END)
-										THEN (CASE WHEN f.latest_depart < f.ten_pm THEN f.latest_depart ELSE f.ten_pm END)
-									ELSE f.center_depart
-								END
-						ELSE f.center_depart
-					END
-				END AS depart_time_timestamp
-			FROM final_pick AS f
-		)
-		INSERT INTO HHSurvey.Trip (
-			hhid, person_id, pernum, tripnum, psrc_inserted, revision_code, dest_purpose,
-			mode_1, modes, travelers_hh, travelers_nonhh, travelers_total,
-			origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
-			distance_miles, depart_time_timestamp, arrival_time_timestamp, travel_time
-		)
-		SELECT 
-			ch.hhid,
-			ch.person_id,
-			ch.pernum,
-			99 AS tripnum,
-			1  AS psrc_inserted,
-			ch.revision_code,
-			-9998 AS dest_purpose,
-			ch.mode_imputed AS mode_1,
-			CAST(ch.mode_imputed AS NVARCHAR(20)) AS modes,
-			ch.travelers_hh,
-			ch.travelers_nonhh,
-			ch.travelers_total,
-			ch.gap_origin_lat,
-			ch.gap_origin_lng,
-			ch.gap_origin_geog,
-			ch.gap_dest_lat,
-			ch.gap_dest_lng,
-			ch.gap_dest_geog,
-			ch.distance_mi,
-			ch.depart_time_timestamp,
-			DATEADD(MINUTE, ch.travel_minutes, ch.depart_time_timestamp) AS arrival_time_timestamp,
-			ch.travel_minutes
-		FROM choose_time AS ch
-		ORDER BY ch.person_id, ch.recid;
+    IF @Debug=1 SELECT * FROM #selected_donors;
 
-		-- Remove processed items regardless of insert success
-		DELETE w
-		FROM #worklist w
-		JOIN #batch25 b ON b.recid = w.recid;
+    /* Replicate donor trips (only minimal contiguous sequence between anchor trips) */
+    IF EXISTS (SELECT 1 FROM #selected_donors)
+    BEGIN
+      IF OBJECT_ID('tempdb..#donor_inserted') IS NOT NULL DROP TABLE #donor_inserted;
+      /* new_trip_recid captured first; gap_id assigned in a follow-up update to avoid alias binding issue in OUTPUT */
+      CREATE TABLE #donor_inserted(new_trip_recid INT PRIMARY KEY, gap_id INT NULL);
+      INSERT INTO HHSurvey.Trip (
+        hhid, person_id, pernum, tripnum, psrc_inserted, revision_code, dest_purpose,
+        mode_1, modes, travelers_hh, travelers_nonhh, travelers_total,
+        origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
+        distance_miles, depart_time_timestamp, arrival_time_timestamp, travel_time
+      )
+      OUTPUT inserted.recid, NULL INTO #donor_inserted(new_trip_recid, gap_id)
+      SELECT 
+        t.hhid,
+        g.person_id AS person_id,
+        g.pernum,
+        999 AS tripnum,
+        1 AS psrc_inserted,
+        '16d,' AS revision_code,
+        t.dest_purpose,
+        t.mode_1,
+        t.modes,
+        t.travelers_hh,
+        t.travelers_nonhh,
+        t.travelers_total,
+        t.origin_lat, t.origin_lng, t.origin_geog,
+        t.dest_lat,   t.dest_lng,   t.dest_geog,
+        t.distance_miles,
+        t.depart_time_timestamp,
+        t.arrival_time_timestamp,
+        t.travel_time
+      FROM #selected_donors sd
+      JOIN #gaps g ON g.gap_id = sd.gap_id
+      JOIN HHSurvey.Trip t ON t.person_id = sd.donor_person_id
+        AND t.depart_time_timestamp >= sd.first_depart
+        AND t.arrival_time_timestamp <= sd.last_arrive
+        AND COALESCE(t.psrc_inserted,0)=0
+      WHERE NOT EXISTS (
+        SELECT 1 FROM HHSurvey.Trip r
+        WHERE r.person_id = g.person_id
+          AND r.recid NOT IN (g.prior_recid, g.next_recid)
+          AND r.depart_time_timestamp < t.arrival_time_timestamp
+          AND r.arrival_time_timestamp > t.depart_time_timestamp
+      );
 
-		-- Gentle delay to avoid long-held locks and API stress
-		WAITFOR DELAY '00:00:00.250';
-	END
+      /* Derive gap_id for each inserted donor trip by matching its temporal window inside the gap window */
+      UPDATE di
+        SET gap_id = g.gap_id
+      FROM #donor_inserted di
+      JOIN HHSurvey.Trip it ON it.recid = di.new_trip_recid
+      JOIN #gaps g ON g.person_id = it.person_id
+        AND it.depart_time_timestamp >= g.gap_start_time
+        AND it.arrival_time_timestamp <= g.gap_end_time
+        AND g.status = 0;
 
-done:
-	-- Recalculate once after all batches
-	EXECUTE HHSurvey.recalculate_after_edit;
+      -- Mark gaps with successful donor insertion
+      UPDATE g SET status=1
+      FROM #gaps g
+      WHERE EXISTS (SELECT 1 FROM #donor_inserted di WHERE di.gap_id = g.gap_id) AND g.status=0;
+
+      -- Any selected donors with zero inserted trips become skipped (status=3)
+      UPDATE g SET status=3
+      FROM #gaps g
+      JOIN #selected_donors sd ON sd.gap_id = g.gap_id
+      WHERE g.status=0;
+
+      -- Re-sequence affected persons (distinct recipients with donor fills)
+      EXEC HHSurvey.tripnum_update;
+    END
+
+    /* 3. Dwell statistics table (placeholder) */
+    IF OBJECT_ID('tempdb..#dwell_stats') IS NOT NULL DROP TABLE #dwell_stats;
+    /* Build dwell duration empirical stats by (dest_purpose, employment, student, overnight_home_flag) */
+    ;WITH base_dwells AS (
+      SELECT 
+        t.person_id,
+        t.recid,
+        t.dest_purpose,
+        p.employment,
+        p.student,
+        t.arrival_time_timestamp AS arrive_time,
+        nxt.depart_time_timestamp AS next_depart,
+        t.dest_geog,
+        nxt.origin_geog,
+        CASE WHEN t.dest_purpose = 1 AND 
+                  (DATEPART(HOUR, t.arrival_time_timestamp) <= 3 OR DATEPART(HOUR, nxt.depart_time_timestamp) <= 3) AND
+                  DATEDIFF(HOUR, t.arrival_time_timestamp, nxt.depart_time_timestamp) >= 3 THEN 1 ELSE 0 END AS overnight_home_flag,
+        DATEDIFF(MINUTE, t.arrival_time_timestamp, nxt.depart_time_timestamp) AS dwell_minutes
+      FROM HHSurvey.Trip t WITH (NOLOCK)
+      JOIN HHSurvey.Trip nxt WITH (NOLOCK)
+        ON nxt.person_id = t.person_id AND nxt.tripnum = t.tripnum + 1
+      JOIN HHSurvey.person p WITH (NOLOCK) ON p.person_id = t.person_id
+      WHERE t.dest_geog IS NOT NULL AND nxt.origin_geog IS NOT NULL
+        AND t.dest_geog.STDistance(nxt.origin_geog) < 100 -- same place
+        AND t.arrival_time_timestamp IS NOT NULL AND nxt.depart_time_timestamp IS NOT NULL
+        AND DATEDIFF(MINUTE, t.arrival_time_timestamp, nxt.depart_time_timestamp) BETWEEN 1 AND 720
+    ), marked AS (
+      SELECT *, 
+        CASE WHEN dest_purpose <> 1 THEN 0 ELSE overnight_home_flag END AS overnight_home_strat
+      FROM base_dwells
+    ), stats AS (
+      SELECT 
+        dest_purpose,
+        employment,
+        student,
+        overnight_home_strat,
+        COUNT(*) AS n,
+        AVG(CAST(dwell_minutes AS FLOAT)) AS mean_dwell,
+        STDEV(CAST(dwell_minutes AS FLOAT)) AS stdev_dwell
+      FROM marked
+      GROUP BY dest_purpose, employment, student, overnight_home_strat
+      HAVING COUNT(*) >= 5
+    )
+    SELECT * INTO #dwell_stats FROM stats;
+    IF @Debug=1 SELECT TOP 50 * FROM #dwell_stats ORDER BY n DESC;
+
+    /* Fallback aggregated levels for sparse matches will be handled via CROSS APPLY during sampling */
+
+    /* 4. Imputation for remaining gaps (placeholder) */
+  -- For each status=0 gap: sample dwell, route, insert bridging trip, status=2; if routing fails status=3.
+  -- Implement sampling + routing below.
+  IF EXISTS (SELECT 1 FROM #gaps WHERE status = 0)
+    BEGIN
+      -- Random helper (deterministic optional)
+      DECLARE @R BIGINT = COALESCE(@Seed, ABS(CHECKSUM(NEWID())));
+      DECLARE @A BIGINT = 1103515245, @C BIGINT = 12345, @M BIGINT = 2147483648; -- LCG params
+
+      IF OBJECT_ID('tempdb..#impute') IS NOT NULL DROP TABLE #impute;
+      SELECT g.*, p.employment, p.student,
+        CASE WHEN g.prior_mode = g.next_mode THEN g.prior_mode ELSE 995 END AS chosen_mode
+      INTO #impute
+      FROM #gaps g
+      JOIN HHSurvey.person p WITH (NOLOCK) ON p.person_id = g.person_id
+      WHERE g.status = 0;
+
+      -- Add overnight strat flag for home start
+      ALTER TABLE #impute ADD overnight_home_strat INT NULL;
+      UPDATE i SET overnight_home_strat = CASE 
+          WHEN EXISTS (SELECT 1 FROM HHSurvey.Trip t WHERE t.recid = i.prior_recid AND t.dest_purpose = 1) AND DATEPART(HOUR, i.gap_start_time) <= 3 THEN 1 ELSE 0 END
+      FROM #impute i;
+
+      -- Sample dwell and call routing per row using a cursor (limits API stress). Could batch later if needed.
+      DECLARE gap_cursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT gap_id, gap_start_time, gap_end_time, gap_start_lat, gap_start_lng, gap_end_lat, gap_end_lng,
+               employment, student, overnight_home_strat, chosen_mode
+        FROM #impute;
+
+      DECLARE @gap_id INT, @start DATETIME2, @end DATETIME2, @olat FLOAT, @olng FLOAT, @dlat FLOAT, @dlng FLOAT,
+              @emp INT, @stu INT, @overnight INT, @mode INT;
+      DECLARE @window_minutes INT, @sampled_dwell INT, @route_result NVARCHAR(200), @comma INT,
+              @distance_mi FLOAT, @travel_minutes INT, @depart DATETIME2, @arrival DATETIME2, @usable INT;
+
+      OPEN gap_cursor;
+      FETCH NEXT FROM gap_cursor INTO @gap_id, @start, @end, @olat, @olng, @dlat, @dlng, @emp, @stu, @overnight, @mode;
+      WHILE @@FETCH_STATUS = 0
+      BEGIN
+        SET @window_minutes = DATEDIFF(MINUTE, @start, @end);
+        -- Advance RNG
+        SET @R = (@A * @R + @C) % @M;
+        DECLARE @u FLOAT = CAST(@R AS FLOAT)/@M; -- uniform 0..1
+        -- Pull dwell stats with fallback cascade
+        DECLARE @mean FLOAT = NULL, @sd FLOAT = NULL;
+        SELECT TOP 1 @mean = mean_dwell, @sd = NULLIF(stdev_dwell,0)
+        FROM #dwell_stats ds
+        WHERE ds.dest_purpose = (SELECT dest_purpose FROM HHSurvey.Trip t WHERE t.recid = (SELECT prior_recid FROM #gaps WHERE gap_id=@gap_id))
+          AND ds.employment = @emp AND ds.student = @stu AND ds.overnight_home_strat = COALESCE(@overnight,0)
+        ORDER BY n DESC;
+        IF @mean IS NULL
+        BEGIN
+          SELECT TOP 1 @mean = mean_dwell, @sd = NULLIF(stdev_dwell,0)
+          FROM #dwell_stats ds
+          WHERE ds.employment = @emp AND ds.student = @stu
+          ORDER BY n DESC;
+        END
+        IF @mean IS NULL SELECT TOP 1 @mean = mean_dwell, @sd = NULLIF(stdev_dwell,0) FROM #dwell_stats ORDER BY n DESC; -- global fallback
+        IF @mean IS NULL SET @mean = 10; -- absolute fallback
+        IF @sd   IS NULL SET @sd = @mean * 0.25; -- heuristic
+
+        -- Simple approx normal using sum of 3 uniforms (central limit)
+        SET @R = (@A * @R + @C) % @M; DECLARE @u2 FLOAT = CAST(@R AS FLOAT)/@M;
+        SET @R = (@A * @R + @C) % @M; DECLARE @u3 FLOAT = CAST(@R AS FLOAT)/@M;
+        DECLARE @z FLOAT = ((@u + @u2 + @u3) / 3.0) - 0.5; -- centered ~uniform-ish; scale to [-0.5,0.5]
+        SET @sampled_dwell = CAST(ROUND(@mean + @z * 2 * @sd,0) AS INT); -- expand factor 2 for variability
+        IF @sampled_dwell < 1 SET @sampled_dwell = 1;
+        IF @sampled_dwell > (@window_minutes - 1) SET @sampled_dwell = @window_minutes / 2; -- quick clamp
+
+        -- Routing call
+        SET @route_result = Elmer.dbo.route_mi_min(@olng, @olat, @dlng, @dlat,
+          CASE 
+            WHEN EXISTS (SELECT 1 FROM HHSurvey.automodes WHERE mode_id=@mode) THEN 'driving'
+            WHEN EXISTS (SELECT 1 FROM HHSurvey.transitmodes WHERE mode_id=@mode) THEN 'transit'
+            WHEN EXISTS (SELECT 1 FROM HHSurvey.bikemodes WHERE mode_id=@mode) THEN 'bicycling'
+            WHEN @mode = 1 THEN 'walking'
+            ELSE 'driving'
+          END, @GoogleKey, DATEADD(MINUTE, @window_minutes/2, @start));
+
+        IF @route_result IS NULL
+        BEGIN
+          UPDATE #gaps SET status = 3 WHERE gap_id=@gap_id; -- skipped due to routing fail
+        END
+        ELSE
+        BEGIN
+          SET @comma = CHARINDEX(',', @route_result);
+          SET @distance_mi = TRY_CONVERT(FLOAT, LEFT(@route_result, @comma-1));
+          SET @travel_minutes = TRY_CONVERT(INT, ROUND(TRY_CONVERT(FLOAT, SUBSTRING(@route_result, @comma+1, 50)),0));
+          IF @travel_minutes IS NULL OR @travel_minutes <=0
+          BEGIN
+            UPDATE #gaps SET status=3 WHERE gap_id=@gap_id;
+          END
+          ELSE
+          BEGIN
+             -- If dwell + travel > window, center
+             IF (@sampled_dwell + @travel_minutes) > @window_minutes
+             BEGIN
+               DECLARE @total INT = @sampled_dwell + @travel_minutes;
+               DECLARE @excess INT = @total - @window_minutes;
+               -- Reduce dwell proportionally
+               SET @sampled_dwell = @sampled_dwell - (@excess/2);
+               IF @sampled_dwell < 1 SET @sampled_dwell = 1;
+             END
+             SET @depart = DATEADD(MINUTE, @sampled_dwell, @start);
+             SET @arrival = DATEADD(MINUTE, @travel_minutes, @depart);
+             IF @arrival > @end
+             BEGIN
+               -- Center trip instead: place travel in middle
+               DECLARE @mid DATETIME2 = DATEADD(MINUTE, @window_minutes/2, @start);
+               SET @depart = DATEADD(MINUTE, -(@travel_minutes/2), @mid);
+               SET @arrival = DATEADD(MINUTE, @travel_minutes, @depart);
+             END
+
+             INSERT INTO HHSurvey.Trip (
+               hhid, person_id, pernum, tripnum, psrc_inserted, revision_code, dest_purpose,
+               mode_1, modes, travelers_hh, travelers_nonhh, travelers_total,
+               origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
+               distance_miles, depart_time_timestamp, arrival_time_timestamp, travel_time
+             )
+             SELECT g.hhid, g.person_id, g.pernum, 998, 1, '16i,', -9998,
+               @mode, CAST(@mode AS NVARCHAR(20)), -9997, -9997, -9997,
+               g.gap_start_lat, g.gap_start_lng, g.gap_start_geog,
+               g.gap_end_lat, g.gap_end_lng, g.gap_end_geog,
+               @distance_mi, @depart, @arrival, @travel_minutes
+             FROM #gaps g 
+             WHERE g.gap_id=@gap_id
+               AND NOT EXISTS (
+                 SELECT 1 FROM HHSurvey.Trip r
+                 WHERE r.person_id = g.person_id
+                   AND r.depart_time_timestamp < @arrival
+                   AND r.arrival_time_timestamp > @depart
+               );
+
+             UPDATE #gaps SET status=2 WHERE gap_id=@gap_id;
+          END
+        END
+
+        FETCH NEXT FROM gap_cursor INTO @gap_id, @start, @end, @olat, @olng, @dlat, @dlng, @emp, @stu, @overnight, @mode;
+      END
+      CLOSE gap_cursor; DEALLOCATE gap_cursor;
+
+      -- Resequence after imputed inserts
+      EXEC HHSurvey.tripnum_update;
+    END
+
+    -- Final sequencing prior to finalize
+    EXEC HHSurvey.tripnum_update;
+
+finalize:
+    EXEC HHSurvey.recalculate_after_edit;
+
+    -- Summary logging
+    IF @Debug=1 OR 1=1 -- always output basic counts
+    BEGIN
+      SELECT 
+        COUNT(*) AS gaps_total,
+        SUM(CASE WHEN status=1 THEN 1 ELSE 0 END) AS donor_filled,
+        SUM(CASE WHEN status=2 THEN 1 ELSE 0 END) AS imputed_filled,
+        SUM(CASE WHEN status=3 THEN 1 ELSE 0 END) AS skipped
+      FROM #gaps;
+    END
+
+  END TRY
+  BEGIN CATCH
+    IF @Debug=1 SELECT ERROR_NUMBER() AS err_no, ERROR_MESSAGE() AS err_msg;
+    THROW;
+  END CATCH
 END
 GO
