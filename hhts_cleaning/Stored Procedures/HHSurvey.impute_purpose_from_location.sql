@@ -18,7 +18,9 @@ AS BEGIN
         0 AS new_dest_purpose
     INTO #api_purpose 
         FROM HHSurvey.Trip AS t LEFT JOIN HHSurvey.Trip AS nxt ON t.person_id = nxt.person_id AND t.tripnum +1 = nxt.tripnum JOIN HHSurvey.Person AS p ON t.person_id = p.person_id
-        WHERE t.dest_purpose IN(SELECT flag_value FROM HHSurvey.NullFlags UNION SELECT 97) OR (t.dest_purpose=60 AND DATEDIFF(Minute, t.arrival_time_timestamp, nxt.depart_time_timestamp) > 60)
+        WHERE (t.dest_purpose IN(SELECT flag_value FROM HHSurvey.NullFlags UNION SELECT 97)                                     --"other"
+               OR (t.dest_purpose=60 AND DATEDIFF(Minute, t.arrival_time_timestamp, nxt.depart_time_timestamp) > 60)            --"change mode" but didn't qualify for trip linking
+               OR t.dest_purpose IN(45, 46, 48) AND DATEDIFF(Minute, t.arrival_time_timestamp, nxt.depart_time_timestamp) > 35) --PUDO but unreasonably long
         AND t.dest_is_home<>1 AND t.dest_is_work<>1;
     COMMIT TRANSACTION;		
 
@@ -44,10 +46,19 @@ AS BEGIN
     -- If @GoogleKey IS NULL, Elmer.dbo.loc_recognize used Nominatim; use OSM type lookup. Otherwise use Google EntityType lookup.
     IF @GoogleKey IS NULL
     BEGIN
+        -- Normalize loc_result to the OSM "type" only (strip optional "class:" prefix),
+        -- trim whitespace, and compare case-insensitively to improve matching robustness.
         UPDATE a 
         SET a.new_dest_purpose = b.dest_purpose
         FROM #api_purpose AS a
-        JOIN HHSurvey.OsmType_purpose_lookup AS b ON b.OsmType = a.loc_result
+        JOIN HHSurvey.OsmType_purpose_lookup AS b
+            ON LOWER(LTRIM(RTRIM(b.OsmType))) = LOWER(LTRIM(RTRIM(
+                CASE
+                    WHEN a.loc_result IS NULL THEN ''
+                    WHEN CHARINDEX(':', a.loc_result) > 0 THEN SUBSTRING(a.loc_result, CHARINDEX(':', a.loc_result) + 1, LEN(a.loc_result))
+                    ELSE a.loc_result
+                END
+            )))
         WHERE a.new_dest_purpose = 0 AND b.dest_purpose IS NOT NULL;
     END
     ELSE
