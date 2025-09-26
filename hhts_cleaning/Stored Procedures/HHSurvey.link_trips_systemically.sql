@@ -133,15 +133,16 @@ AS BEGIN
       , CAST(0 AS int) AS trip_link
     FROM HHSurvey.Trip as trip 
         JOIN HHSurvey.Trip AS next_trip ON trip.person_id=next_trip.person_id AND trip.tripnum + 1 = next_trip.tripnum
-    WHERE trip.dest_is_home IS NULL AND trip.dest_is_work IS NULL AND (											  -- destination of preceding leg isn't home or work
-            (trip.origin_geog.STEquals(next_trip.origin_geog)=1 AND trip.dest_geog.STEquals(next_trip.dest_geog)=1) OR-- coordinates identical to prior (denotes RSG-split trip components)	
-        (trip.dest_purpose = 60 AND DATEDIFF(Minute, trip.arrival_time_timestamp, next_trip.depart_time_timestamp) < 45)) -- change mode purpose, max 45min dwell (relaxed from 2021)
-        OR (trip.travelers_total = next_trip.travelers_total	 												      -- traveler # the same
-    AND trip.dest_purpose = next_trip.dest_purpose 
-    AND trip.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.PUDO_purposes) -- purpose allows for linking (excludes PUDO purposes)
-    AND trip.dest_purpose <> 51 -- prevent linking purely recreational/exercise segments when purposes match
-        AND (trip.mode_1<>next_trip.mode_1 OR trip.mode_1 IN(SELECT flag_value FROM HHSurvey.NullFlags) OR trip.mode_1 IN(SELECT mode_id FROM HHSurvey.transitmodes)) --either change modes or switch transit lines                     
-        AND DATEDIFF(Minute, trip.arrival_time_timestamp, next_trip.depart_time_timestamp) < 15);                 -- under 15min dwell
+    WHERE trip.dest_is_home IS NULL AND trip.dest_is_work IS NULL AND (											      -- destination of preceding leg isn't home or work
+    --first case: "change mode" purpose chosen (or RSG indicates split linked trip)
+            ((trip.origin_geog.STEquals(next_trip.origin_geog)=1 AND trip.dest_geog.STEquals(next_trip.dest_geog)=1)  -- coordinates identical to prior (denotes RSG-split trip components)	
+           OR(trip.dest_purpose = 60 AND DATEDIFF(Minute, trip.arrival_time_timestamp, next_trip.depart_time_timestamp) <= 60) -- change mode purpose, max 60min dwell
+           OR(trip.dest_purpose = 60 AND next_trip.mode_1 IN(80,108) AND DATEDIFF(Minute, trip.arrival_time_timestamp, next_trip.depart_time_timestamp) <= 120)) --longer dwell allowed for ferry
+    --second case: pattern suggests "change mode"; more conservative dwell critiera   
+        OR (trip.travelers_total = next_trip.travelers_total AND trip.dest_purpose = next_trip.dest_purpose 	 												      -- traveler # the same
+            AND trip.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.PUDO_purposes UNION SELECT 51) -- purpose match excludes pick-up/drop-off, exercise/recreational
+            AND (trip.mode_1<>next_trip.mode_1 OR trip.mode_1 IN(SELECT flag_value FROM HHSurvey.NullFlags UNION SELECT mode_id FROM HHSurvey.transitmodes)) --either change modes or switch transit lines                     
+            AND DATEDIFF(Minute, trip.arrival_time_timestamp, next_trip.depart_time_timestamp) < 15));                 -- under 15min dwell
     COMMIT TRANSACTION;
     BEGIN TRANSACTION;
     -- set the trip_link value of the 2nd component to the tripnum of the 1st component.
