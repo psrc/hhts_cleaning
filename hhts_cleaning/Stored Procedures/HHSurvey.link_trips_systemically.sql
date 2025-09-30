@@ -142,7 +142,10 @@ AS BEGIN
         OR (trip.travelers_total = next_trip.travelers_total AND trip.dest_purpose = next_trip.dest_purpose 	 												      -- traveler # the same
             AND trip.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.PUDO_purposes UNION SELECT 51) -- purpose match excludes pick-up/drop-off, exercise/recreational
             AND (trip.mode_1<>next_trip.mode_1 OR trip.mode_1 IN(SELECT flag_value FROM HHSurvey.NullFlags UNION SELECT mode_id FROM HHSurvey.transitmodes)) --either change modes or switch transit lines                     
-            AND DATEDIFF(Minute, trip.arrival_time_timestamp, next_trip.depart_time_timestamp) < 15));                 -- under 15min dwell
+            AND DATEDIFF(Minute, trip.arrival_time_timestamp, next_trip.depart_time_timestamp) < 15))                 -- under 15min dwell
+         -- Exclude any candidate pair where either side contains mode 31 (airplane) in the consolidated modes list; also breaks sequence past a 31 trip
+         AND ((trip.modes IS NULL OR CHARINDEX(',31,', CONCAT(',', trip.modes, ',')) = 0)
+                 AND (next_trip.modes IS NULL OR CHARINDEX(',31,', CONCAT(',', next_trip.modes, ',')) = 0) );
     COMMIT TRANSACTION;
     BEGIN TRANSACTION;
     -- set the trip_link value of the 2nd component to the tripnum of the 1st component.
