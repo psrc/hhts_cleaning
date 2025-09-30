@@ -60,7 +60,10 @@ AS BEGIN
         UNION ALL SELECT t_next.recid, t_next.person_id, t_next.tripnum,	           		   		   'starts, not from home' AS error_flag
         FROM trip_ref AS t2 JOIN trip_ref AS t_next ON t2.person_id = t_next.person_id AND t2.tripnum + 1 = t_next.tripnum
             WHERE DATEDIFF(Day, t2.arrival_time_timestamp, t_next.depart_time_timestamp) = 1 -- t_next is first trip of the day
-                AND t2.dest_is_home IS NULL AND t2.origin_purpose NOT IN(SELECT purpose_id FROM HHSurvey.sleepstay_purposes)
+                AND t2.dest_is_home IS NULL 
+                AND t2.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.sleepstay_purposes 
+                                           UNION SELECT purpose_id FROM HHSurvey.social_purposes
+                                           UNION SELECT purpose_id from HHSurvey.work_purposes) -- Exempting shift work
                 AND DATEPART(Hour, t_next.depart_time_timestamp) > 1  -- Night owls typically home before 2am
 
             UNION ALL SELECT t3.recid, t3.person_id, t3.tripnum, 									       		 'purpose missing' AS error_flag
@@ -194,7 +197,7 @@ AS BEGIN
                     AND DATEDIFF(Minute, t24.arrival_time_timestamp, 
                             CASE WHEN t_next.recid IS NULL 
                                     THEN DATETIME2FROMPARTS(DATEPART(year, t24.arrival_time_timestamp),DATEPART(month, t24.arrival_time_timestamp),DATEPART(day, t24.arrival_time_timestamp),3,0,0,0,0) 
-                                    ELSE t_next.depart_time_timestamp END) > 35)    
+                                    ELSE t_next.depart_time_timestamp END) > 210)    
 
         UNION ALL SELECT t25.recid, t25.person_id, t25.tripnum, 		  				   		          'non-student + school trip' AS error_flag
             FROM trip_ref AS t25 JOIN HHSurvey.Trip as t_next ON t25.person_id = t_next.person_id AND t25.tripnum + 1 = t_next.tripnum JOIN hhts_cleaning.HHSurvey.Person ON t25.person_id=person.person_id 					
