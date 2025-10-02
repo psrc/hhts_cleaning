@@ -8,7 +8,7 @@ GO
         UPDATE t--Classify home destinations
             SET t.dest_is_home = 1
             FROM HHSurvey.Trip AS t JOIN HHSurvey.household AS h ON t.hhid = h.hhid
-            WHERE t.dest_geog.STDistance(h.home_geog) < 50;
+            WHERE t.dest_geog.STDistance(h.home_geog) < 100;
 
         UPDATE t --Classify home purposes where destination code is absent; 50m proximity to home location on file
             SET t.dest_purpose = 1, 
@@ -19,19 +19,19 @@ GO
         UPDATE t --Classify primary work destinations
             SET t.dest_is_work = 1
             FROM HHSurvey.Trip AS t JOIN HHSurvey.person AS p ON t.person_id = p.person_id AND p.employment > 1
-            WHERE t.dest_geog.STDistance(p.work_geog) < 50;
+            WHERE t.dest_geog.STDistance(p.work_geog) < 100;
 
-        UPDATE t --Classify work destinations where destination code is absent; 50m proximity to work location on file
+        UPDATE t --Classify work destinations where destination code is absent; 100m proximity to work location on file
             SET t.dest_purpose = 10, t.revision_code = CONCAT(t.revision_code,'5,')
             FROM HHSurvey.Trip AS t JOIN HHSurvey.person AS p ON t.person_id  = p.person_id AND p.employment > 1
             WHERE t.dest_is_work = 1 AND t.dest_purpose <> 10
                 AND t.dest_purpose in(SELECT flag_value FROM HHSurvey.NullFlags UNION SELECT 60 UNION SELECT 97);
 
-        UPDATE t --Classify school destinations where destination code is absent; 50m proximity to school location on file
+        UPDATE t --Classify school destinations where destination code is absent; 100m proximity to school location on file
             SET t.dest_purpose = CASE WHEN p.age_detailed < 5 THEN 26 WHEN p.age_detailed < 19 THEN 21 ELSE 22 END, t.revision_code = CONCAT(t.revision_code,'5,')
             FROM HHSurvey.Trip AS t JOIN HHSurvey.person AS p ON t.person_id  = p.person_id AND p.student BETWEEN 2 and 7
             WHERE t.dest_purpose in(SELECT flag_value FROM HHSurvey.NullFlags UNION SELECT 60 UNION SELECT 97)
-                AND t.dest_geog.STDistance(p.school_geog) < 50;		
+                AND t.dest_geog.STDistance(p.school_geog) < 100;		
 
         UPDATE t --revises purpose field for home return portion of a single stop loop trip 
             SET t.dest_purpose = 1, t.revision_code = CONCAT(t.revision_code,'1,')
@@ -134,7 +134,7 @@ GO
     WITH cte AS (SELECT t1.person_id, t1.recid, t2.dest_purpose 
                     FROM HHSurvey.Trip AS t1
                     JOIN HHSurvey.Trip AS t2 ON t1.person_id = t2.person_id
-                    WHERE t1.dest_geog.STDistance(t2.dest_geog) < 50 AND (t1.dest_purpose in(SELECT flag_value FROM HHSurvey.NullFlags) OR t1.dest_purpose=97) AND t2.dest_purpose NOT in(SELECT flag_value FROM HHSurvey.NullFlags) AND t2.dest_purpose<>97
+                    WHERE t1.dest_geog.STDistance(t2.dest_geog) < 100 AND (t1.dest_purpose in(SELECT flag_value FROM HHSurvey.NullFlags) OR t1.dest_purpose=97) AND t2.dest_purpose NOT in(SELECT flag_value FROM HHSurvey.NullFlags) AND t2.dest_purpose<>97
                     GROUP BY t1.person_id, t1.recid, t2.dest_purpose),
         cte_filter AS (SELECT cte.person_id, cte.recid, count(*) AS instances FROM cte GROUP BY cte.person_id, cte.recid HAVING count(*) = 1)
     UPDATE t 
@@ -145,7 +145,7 @@ GO
     --if anyone has been to the purpose-missing location at other times and all visitors provided a consistent purpose for those trips, use it again
     WITH cte AS (SELECT t1.recid, t2.dest_purpose 
                     FROM HHSurvey.Trip AS t1
-                    JOIN HHSurvey.Trip AS t2 ON t1.dest_geog.STDistance(t2.dest_geog) < 50 
+                    JOIN HHSurvey.Trip AS t2 ON t1.dest_geog.STDistance(t2.dest_geog) < 100 
                     WHERE t2.dest_purpose NOT IN (1,10) AND (t1.dest_purpose in(SELECT flag_value FROM HHSurvey.NullFlags) OR t1.dest_purpose=97) AND t2.dest_purpose NOT in(SELECT flag_value FROM HHSurvey.NullFlags) AND t2.dest_purpose<>97
                     GROUP BY t1.recid, t2.dest_purpose),
         cte_filter AS (SELECT cte.recid, count(*) AS instances FROM cte GROUP BY cte.recid HAVING count(*) = 1)
