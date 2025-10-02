@@ -558,7 +558,6 @@ BEGIN
       WHERE g.status = 0;
 
       -- Add overnight strat flag for home start
-      ALTER TABLE #impute ADD overnight_home_strat INT NULL;
       UPDATE i SET overnight_home_strat = CASE 
           WHEN EXISTS (SELECT 1 FROM HHSurvey.Trip t WHERE t.recid = i.prior_recid AND t.dest_purpose = 1) AND DATEPART(HOUR, i.gap_start_time) <= 3 THEN 1 ELSE 0 END
       FROM #impute i;
