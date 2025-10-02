@@ -74,14 +74,14 @@ DECLARE @GoogleKey nvarchar = '<insert Google API key>']
 	EXECUTE HHSurvey.tripnum_update;                            -- Tripnum must be sequential or later steps will fail.
 
 /* STEP 3.  Fill out missing elements; make clear corrections */
-	EXECUTE HHSurvey.fill_gaps_between_trips @GoogleKey='AIzaSyDJlTf9W7p8FREVyo_ckw4Boid05bvZIKA', @Debug=1; -- Inserts a bridge trip where discontinuity exists (e.g. the App was turned off)
+	EXECUTE HHSurvey.fill_gaps_between_trips @GoogleKey='<key>', @Debug=0; -- Inserts a bridge trip where discontinuity exists (e.g. the App was turned off)
 	EXECUTE HHSurvey.update_membercounts;                       -- Revise travelers count to reflect passengers (lazy response?)	
 	EXECUTE HHSurvey.fix_mistaken_passenger_carryovers;         -- When 'driver' code or work purpose are attributed to accompanying passengers
 	EXECUTE HHSurvey.dest_purpose_updates;                      -- Destination purpose revisions (extensive)
 	EXECUTE HHSurvey.initial_origin_purpose;                    -- Origin purpose assignment: Assumes purpose codes: 1 (home) and 10 (primary work)
 	EXECUTE HHSurvey.impute_purpose_from_location NULL;         -- Nominatim; utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
-	EXECUTE HHSurvey.impute_purpose_from_location @GoogleKey;   -- Google Places; utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
-	EXECUTE HHSurvey.impute_missing_mode @GoogleKey, @dry_run=0; -- Utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
+	EXECUTE HHSurvey.impute_purpose_from_location @GoogleKey='<key>';   -- Google Places; utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
+	EXECUTE HHSurvey.impute_missing_mode @GoogleKey='<key>', @dry_run=0; -- Utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
 
 /* STEP 4.	Adjust speed/time; trip linking */ 
 	EXECUTE HHSurvey.revise_excessive_speed_trips @GoogleKey;   -- Change departure or arrival times for records that would qualify for 'excessive speed' flag
