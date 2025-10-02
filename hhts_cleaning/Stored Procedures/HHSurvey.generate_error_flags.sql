@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE   PROCEDURE [HHSurvey].[generate_error_flags] 
+CREATE    PROCEDURE [HHSurvey].[generate_error_flags] 
     @target_person_id decimal = NULL --If missing, generated for all records
 AS BEGIN
     SET NOCOUNT ON
@@ -105,7 +105,8 @@ AS BEGIN
 
         UNION ALL SELECT  t11.recid,  t11.person_id,  t11.tripnum, 							 		 'non-worker + work trip' AS error_flag
             FROM trip_ref AS t11 JOIN hhts_cleaning.HHSurvey.Person AS p ON p.person_id= t11.person_id
-            WHERE p.employment IN(5,6,7) AND  t11.dest_purpose in(SELECT purpose_id FROM HHSurvey.work_purposes)
+            WHERE (p.employment IN(5,6,7) OR (p.age_detailed < 15 AND p.employment NOT IN(1,2,3,4)))
+            AND  t11.dest_purpose IN(10,11)
 
         UNION ALL SELECT t12.recid, t12.person_id, t12.tripnum, 												'instantaneous' AS error_flag
             FROM trip_ref AS t12	
@@ -161,7 +162,7 @@ AS BEGIN
 
         UNION ALL SELECT t22.recid, t22.person_id, t22.tripnum,	              	 			 			 '"change mode" purpose' AS error_flag	
             FROM trip_ref AS t22 JOIN HHSurvey.Trip AS t_next ON t22.person_id = t_next.person_id AND  t22.tripnum + 1 = t_next.tripnum
-                WHERE t22.dest_purpose = 60 AND Elmer.dbo.rgx_find(t_next.modes,'(31|32)',1) = 0 AND Elmer.dbo.rgx_find(t22.modes,'(31|32)',1) = 0
+                WHERE t22.dest_purpose = 60 AND NOT (Elmer.dbo.rgx_find(t_next.modes,'(31|32|80|108)',1) = 1 OR Elmer.dbo.rgx_find(t22.modes,'(31|32|80|108)',1) = 1)
                 AND t22.travelers_total = t_next.travelers_total
 
 /*        UNION ALL SELECT t23.recid, t23.person_id, t23.tripnum,					          		  		'PUDO, no +/- travelers' AS error_flag
@@ -201,7 +202,7 @@ AS BEGIN
 
         UNION ALL SELECT t25.recid, t25.person_id, t25.tripnum, 		  				   		          'non-student + school trip' AS error_flag
             FROM trip_ref AS t25 JOIN HHSurvey.Trip as t_next ON t25.person_id = t_next.person_id AND t25.tripnum + 1 = t_next.tripnum JOIN hhts_cleaning.HHSurvey.Person ON t25.person_id=person.person_id 					
-            WHERE t25.dest_purpose IN(SELECT purpose_id FROM HHSurvey.ed_purposes)		
+            WHERE t25.dest_purpose IN(21,22)		
                 AND (person.student=1) AND person.age_detailed > 17					
             )
 
