@@ -3,7 +3,7 @@ GO
 SET ANSI_NULLS ON
 GO
 
-CREATE    PROCEDURE [HHSurvey].[link_trips]
+CREATE   PROCEDURE [HHSurvey].[link_trips]
     @trip_ingredients HHSurvey.TripIngredientType READONLY
 AS
 BEGIN
@@ -94,6 +94,65 @@ BEGIN
     FROM HHSurvey.Trip AS t JOIN #trip_ingredient AS ti ON t.recid=ti.recid
         WHERE t.tripnum <> ti.trip_link AND EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE ti.person_id = lt.person_id AND ti.trip_link = lt.trip_link);	
 
+
+    /* Capture component trip mode values BEFORE deleting ingredients so we can rebuild mode_1..4 and access/egress
+       without relying on the concatenated string field (previous regex-based approach). */
+    DROP TABLE IF EXISTS #component_modes;
+    SELECT 
+        ti.person_id,
+        ti.trip_link,
+        ti.tripnum AS component_tripnum,
+        ROW_NUMBER() OVER (PARTITION BY ti.person_id, ti.trip_link ORDER BY ti.tripnum) AS component_order,
+        v.mode_code,
+        v.pos AS position_in_component
+    INTO #component_modes
+    FROM #trip_ingredient ti
+    CROSS APPLY (VALUES (ti.mode_1,1),(ti.mode_2,2),(ti.mode_3,3),(ti.mode_4,4)) v(mode_code,pos)
+    WHERE ti.trip_link > 0
+      AND v.mode_code IS NOT NULL
+      AND v.mode_code NOT IN (995,-9998,-9999); -- exclude sentinels
+
+    /* Capture driver values per component before deletion for later aggregation */
+    DROP TABLE IF EXISTS #component_driver_values;
+    SELECT ti.person_id, ti.trip_link, ti.tripnum AS component_tripnum,
+           ROW_NUMBER() OVER (PARTITION BY ti.person_id, ti.trip_link ORDER BY ti.tripnum) AS component_order,
+           ti.driver
+    INTO #component_driver_values
+    FROM #trip_ingredient ti
+    WHERE ti.trip_link > 0;
+
+    /* Capture edge component original access/egress modes and whether first/last components are transit. */
+    DROP TABLE IF EXISTS #component_edge_modes;
+    WITH comp AS (
+        SELECT ti.person_id, ti.trip_link, ti.tripnum,
+               ROW_NUMBER() OVER (PARTITION BY ti.person_id, ti.trip_link ORDER BY ti.tripnum) AS rn,
+               COUNT(*) OVER (PARTITION BY ti.person_id, ti.trip_link) AS cnt,
+               ti.mode_acc, ti.mode_egr
+        FROM #trip_ingredient ti
+        WHERE ti.trip_link > 0
+    )
+    SELECT c.person_id, c.trip_link,
+           MAX(CASE WHEN c.rn = 1 THEN c.mode_acc END) AS first_component_mode_acc,
+           MAX(CASE WHEN c.rn = c.cnt THEN c.mode_egr END) AS last_component_mode_egr,
+           CAST(0 AS bit) AS first_component_has_transit,
+           CAST(0 AS bit) AS last_component_has_transit
+    INTO #component_edge_modes
+    FROM comp c
+    GROUP BY c.person_id, c.trip_link;
+
+    -- Populate transit flags
+    UPDATE ce
+        SET first_component_has_transit = CASE WHEN EXISTS (
+                SELECT 1 FROM #component_modes m
+                WHERE m.person_id = ce.person_id AND m.trip_link = ce.trip_link
+                  AND m.component_order = 1
+                  AND m.mode_code IN (SELECT mode_id FROM HHSurvey.transitmodes)) THEN 1 ELSE 0 END,
+            last_component_has_transit = CASE WHEN EXISTS (
+                SELECT 1 FROM #component_modes m
+                WHERE m.person_id = ce.person_id AND m.trip_link = ce.trip_link
+                  AND m.component_order = (SELECT MAX(component_order) FROM #component_modes m2 WHERE m2.person_id = ce.person_id AND m2.trip_link = ce.trip_link)
+                  AND m.mode_code IN (SELECT mode_id FROM HHSurvey.transitmodes)) THEN 1 ELSE 0 END
+    FROM #component_edge_modes ce;
     -- this update achieves trip linking via revising elements of the 1st component (purposely left in the trip table).		
     UPDATE 	t
         SET t.dest_purpose 		= lt.dest_purpose * (CASE WHEN lt.dest_purpose IN(-97,-60) THEN -1 ELSE 1 END),	
@@ -150,37 +209,202 @@ BEGIN
 	)
     WHERE #trip_ingredient.trip_link > 0;
 
-    /* STEP 6.	Mode number standardization, including access and egress characterization */
+    /* STEP 6.  Mode standardization using component trip mode columns.
+        Rules:
+          * Gather all non-sentinel mode codes from component trips (mode_1..mode_4) preserving component order then position.
+          * If ANY transit mode (HHSurvey.transitmodes) appears:
+               - One pre-transit access mode is chosen (preference: automodes > bikemodes > walkmodes) from before the earliest transit component.
+               - One post-transit egress mode chosen similarly from after the last transit component.
+               - Pre-transit and post-transit access/egress candidate modes are NOT placed into mode_1..mode_4.
+               - Internal segment (between first and last transit component inclusive) supplies up to 4 distinct modes (first occurrence order) for mode_1..4.
+          * If NO transit mode: mode_acc/mode_egr set to 995 and first four distinct modes across all components fill mode_1..4.
+          * Distinctness: keep first occurrence; later duplicates ignored.
+    */
 
-    --eliminate repeated values for modes
-    UPDATE t 
-        SET t.modes				= Elmer.dbo.TRIM(Elmer.dbo.rgx_replace(t.modes,'(-?\b\d+\b),(?=\b\1\b)','',1))
-        FROM HHSurvey.Trip AS t WHERE EXISTS (SELECT 1 FROM #linked_trips AS lt WHERE lt.person_id = t.person_id AND lt.trip_link = t.tripnum)
-        ;
-    -- Defer trip re-numbering to recalculate_after_edit (scoped per person)
-            
-    -- Populate separate mode fields
-        WITH cte AS 
-        (
-            SELECT t.recid,
-                   Elmer.dbo.rgx_replace(t.modes, '(?<=\b\1,.*)\b(\w+),?','',1) AS mode_reduced
-            FROM HHSurvey.Trip AS t
-            JOIN #linked_trips AS lt2 ON t.person_id = lt2.person_id AND t.tripnum = lt2.trip_link
-        )
+    -- Compute transit bounds per linked trip
+    DROP TABLE IF EXISTS #transit_bounds;
+    SELECT cm.person_id, cm.trip_link,
+           CASE WHEN COUNT(CASE WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.transitmodes) THEN 1 END) > 0 THEN 1 ELSE 0 END AS has_transit,
+           MIN(CASE WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.transitmodes) THEN component_order END) AS first_transit_order,
+           MAX(CASE WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.transitmodes) THEN component_order END) AS last_transit_order
+    INTO #transit_bounds
+    FROM #component_modes cm
+    GROUP BY cm.person_id, cm.trip_link;
+
+    -- Access and egress mode selection (only when transit present)
+    DROP TABLE IF EXISTS #ae_modes;
+    SELECT tb.person_id, tb.trip_link,
+           acc.access_mode_code,
+           egr.egress_mode_code
+    INTO #ae_modes
+    FROM #transit_bounds tb
+    OUTER APPLY (
+        SELECT TOP 1 cm.mode_code AS access_mode_code
+        FROM #component_modes cm
+        WHERE cm.person_id = tb.person_id AND cm.trip_link = tb.trip_link
+          AND tb.has_transit = 1
+          AND cm.component_order < tb.first_transit_order
+          AND (
+                cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes)
+             OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes)
+             OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes)
+          )
+        ORDER BY CASE 
+                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes) THEN 1
+                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes) THEN 2
+                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes) THEN 3
+                    ELSE 4 END,
+                 cm.component_order,
+                 cm.position_in_component
+    ) acc
+    OUTER APPLY (
+        SELECT TOP 1 cm.mode_code AS egress_mode_code
+        FROM #component_modes cm
+        WHERE cm.person_id = tb.person_id AND cm.trip_link = tb.trip_link
+          AND tb.has_transit = 1
+          AND cm.component_order > tb.last_transit_order
+          AND (
+                cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes)
+             OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes)
+             OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes)
+          )
+        ORDER BY CASE 
+                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes) THEN 1
+                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes) THEN 2
+                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes) THEN 3
+                    ELSE 4 END,
+                 cm.component_order,
+                 cm.position_in_component
+    ) egr;
+
+    -- Internal (or all, if no transit) distinct modes in order
+    DROP TABLE IF EXISTS #internal_modes;
+    WITH internal_candidates AS (
+        SELECT cm.person_id, cm.trip_link, cm.mode_code,
+               MIN(cm.component_order * 10 + cm.position_in_component) AS order_key
+        FROM #component_modes cm
+        JOIN #transit_bounds tb ON tb.person_id = cm.person_id AND tb.trip_link = cm.trip_link
+        LEFT JOIN #ae_modes ae ON ae.person_id = cm.person_id AND ae.trip_link = cm.trip_link
+        WHERE (
+                tb.has_transit = 0
+             OR (cm.component_order BETWEEN tb.first_transit_order AND tb.last_transit_order)
+              )
+        GROUP BY cm.person_id, cm.trip_link, cm.mode_code
+    )
+    SELECT person_id, trip_link, mode_code,
+           ROW_NUMBER() OVER (PARTITION BY person_id, trip_link ORDER BY order_key) AS seq
+    INTO #internal_modes
+    FROM internal_candidates;
+
+    /* Build ordered full mode list including access and egress (if present and not sentinel) then internal modes, de-duplicated by first occurrence */
+    DROP TABLE IF EXISTS #all_modes;
+    WITH seeds AS (
+     -- access (seq base 0)
+     SELECT tb.person_id, tb.trip_link,
+         CASE WHEN tb.has_transit = 1 THEN ae.access_mode_code END AS mode_code,
+         0 AS rank_group,
+         0 AS order_key
+     FROM #transit_bounds tb
+     LEFT JOIN #ae_modes ae ON ae.person_id = tb.person_id AND ae.trip_link = tb.trip_link
+     UNION ALL
+     -- internal modes (seq base 100)
+     SELECT im.person_id, im.trip_link, im.mode_code, 1 AS rank_group, im.seq + 100 AS order_key
+     FROM #internal_modes im
+     UNION ALL
+     -- egress (seq base 200)
+     SELECT tb.person_id, tb.trip_link,
+         CASE WHEN tb.has_transit = 1 THEN ae.egress_mode_code END AS mode_code,
+         2 AS rank_group,
+         200 AS order_key
+     FROM #transit_bounds tb
+     LEFT JOIN #ae_modes ae ON ae.person_id = tb.person_id AND ae.trip_link = tb.trip_link
+    ), filtered AS (
+     SELECT person_id, trip_link, mode_code, order_key
+     FROM seeds
+     WHERE mode_code IS NOT NULL AND mode_code NOT IN (995,-9998,-9999)
+    ), distinct_first AS (
+     SELECT f.person_id, f.trip_link, f.mode_code,
+         ROW_NUMBER() OVER (PARTITION BY f.person_id, f.trip_link ORDER BY MIN(f.order_key)) AS new_seq,
+         MIN(f.order_key) AS first_order_key
+     FROM filtered f
+     GROUP BY f.person_id, f.trip_link, f.mode_code
+    )
+    SELECT person_id, trip_link, mode_code, new_seq
+    INTO #all_modes
+    FROM distinct_first;
+
+    /* Driver aggregation rules:
+      * If any transit present in linked trip -> driver=2 (passenger) regardless of underlying mix (requirement as stated).
+      * Otherwise: if all underlying driver values (excluding NULL) are 1 => 1; if all 2 => 2; if mix of 1 and 2 => 3.
+        Keep 995 only if all are 995 or NULL (no qualifying 1/2). */
+    DROP TABLE IF EXISTS #driver_resolved;
+    WITH drv AS (
+     SELECT d.person_id, d.trip_link,
+         SUM(CASE WHEN d.driver = 1 THEN 1 ELSE 0 END) AS cnt1,
+         SUM(CASE WHEN d.driver = 2 THEN 1 ELSE 0 END) AS cnt2,
+         SUM(CASE WHEN d.driver = 995 THEN 1 ELSE 0 END) AS cnt995,
+         SUM(CASE WHEN d.driver IS NULL THEN 1 ELSE 0 END) AS cntNULL,
+         COUNT(*) AS total
+     FROM #component_driver_values d
+     GROUP BY d.person_id, d.trip_link
+    )
+    SELECT tb.person_id, tb.trip_link,
+        CASE 
+        WHEN tb.has_transit = 1 THEN 2
+        WHEN drv.cnt1 > 0 AND drv.cnt2 = 0 THEN 1
+        WHEN drv.cnt2 > 0 AND drv.cnt1 = 0 THEN 2
+        WHEN drv.cnt1 > 0 AND drv.cnt2 > 0 THEN 3
+        WHEN drv.cnt1 = 0 AND drv.cnt2 = 0 AND drv.cnt995 > 0 AND drv.cnt995 = drv.total THEN 995
+        ELSE 995
+        END AS final_driver
+    INTO #driver_resolved
+    FROM #transit_bounds tb
+    LEFT JOIN drv ON drv.person_id = tb.person_id AND drv.trip_link = tb.trip_link;
+
+    -- Update trips with new mode fields
     UPDATE t
-        SET mode_1 = COALESCE((SELECT match FROM Elmer.dbo.rgx_matches(cte.mode_reduced,'\b\d+\b',1) ORDER BY match_index OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY), 995),
-            mode_2 = COALESCE((SELECT match FROM Elmer.dbo.rgx_matches(cte.mode_reduced,'\b\d+\b',1) ORDER BY match_index OFFSET 1 ROWS FETCH NEXT 1 ROWS ONLY), 995),
-            mode_3 = COALESCE((SELECT match FROM Elmer.dbo.rgx_matches(cte.mode_reduced,'\b\d+\b',1) ORDER BY match_index OFFSET 2 ROWS FETCH NEXT 1 ROWS ONLY), 995),
-            mode_4 = COALESCE((SELECT match FROM Elmer.dbo.rgx_matches(cte.mode_reduced,'\b\d+\b',1) ORDER BY match_index OFFSET 3 ROWS FETCH NEXT 1 ROWS ONLY), 995)
-    FROM HHSurvey.Trip AS t JOIN cte ON t.recid = cte.recid
-    ;
-    -- Limit NULL-to-995 normalization to affected trips only
+        SET t.mode_acc = CASE 
+                            WHEN tb.has_transit = 1 AND cem.first_component_has_transit = 1 
+                                 AND cem.first_component_mode_acc NOT IN (NULL, 995, -9998, -9999) THEN cem.first_component_mode_acc
+                            WHEN tb.has_transit = 1 THEN COALESCE(ae.access_mode_code, 995)
+                            ELSE 995 END,
+            t.mode_egr = CASE 
+                            WHEN tb.has_transit = 1 AND cem.last_component_has_transit = 1 
+                                 AND cem.last_component_mode_egr NOT IN (NULL, 995, -9998, -9999) THEN cem.last_component_mode_egr
+                            WHEN tb.has_transit = 1 THEN COALESCE(ae.egress_mode_code, 995)
+                            ELSE 995 END,
+            t.mode_1 = COALESCE((SELECT im.mode_code FROM #internal_modes im WHERE im.person_id = t.person_id AND im.trip_link = t.tripnum AND im.seq = 1), 995),
+            t.mode_2 = COALESCE((SELECT im.mode_code FROM #internal_modes im WHERE im.person_id = t.person_id AND im.trip_link = t.tripnum AND im.seq = 2), 995),
+            t.mode_3 = COALESCE((SELECT im.mode_code FROM #internal_modes im WHERE im.person_id = t.person_id AND im.trip_link = t.tripnum AND im.seq = 3), 995),
+            t.mode_4 = COALESCE((SELECT im.mode_code FROM #internal_modes im WHERE im.person_id = t.person_id AND im.trip_link = t.tripnum AND im.seq = 4), 995),
+          t.modes = (SELECT STRING_AGG(CAST(am.mode_code AS varchar(10)), ',') 
+                   FROM #all_modes am 
+                   WHERE am.person_id = t.person_id AND am.trip_link = t.tripnum AND am.new_seq BETWEEN 1 AND 6),
+          t.driver = COALESCE(dr.final_driver, t.driver)
+    FROM HHSurvey.Trip t
+    JOIN #linked_trips lt ON lt.person_id = t.person_id AND lt.trip_link = t.tripnum
+    JOIN #transit_bounds tb ON tb.person_id = t.person_id AND tb.trip_link = t.tripnum
+    LEFT JOIN #ae_modes ae ON ae.person_id = t.person_id AND ae.trip_link = t.tripnum
+    LEFT JOIN #component_edge_modes cem ON cem.person_id = t.person_id AND cem.trip_link = t.tripnum
+    LEFT JOIN #driver_resolved dr ON dr.person_id = t.person_id AND dr.trip_link = t.tripnum;
+
+    -- Final safeguard: if any NULLs remain (unexpected), set to 995 for affected trips
     UPDATE t SET t.mode_acc = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_acc IS NULL;
+    UPDATE t SET t.mode_egr = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_egr IS NULL;
     UPDATE t SET t.mode_1   = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_1   IS NULL;
     UPDATE t SET t.mode_2   = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_2   IS NULL;
     UPDATE t SET t.mode_3   = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_3   IS NULL;
-    UPDATE t SET t.mode_4   = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_4   IS NULL; 
-    UPDATE t SET t.mode_egr = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_egr IS NULL;
+    UPDATE t SET t.mode_4   = 995 FROM HHSurvey.Trip AS t JOIN #linked_trips AS lt ON t.person_id = lt.person_id AND t.tripnum = lt.trip_link WHERE t.mode_4   IS NULL;
+
+    -- Clean temp tables
+    DROP TABLE IF EXISTS #internal_modes; 
+    DROP TABLE IF EXISTS #ae_modes; 
+    DROP TABLE IF EXISTS #transit_bounds; 
+    DROP TABLE IF EXISTS #component_edge_modes;
+    DROP TABLE IF EXISTS #driver_resolved;
+    DROP TABLE IF EXISTS #component_driver_values;
+    DROP TABLE IF EXISTS #all_modes;
+    DROP TABLE IF EXISTS #component_modes;
     COMMIT TRANSACTION;
 
     --temp tables should disappear when the spoc ends, but to be tidy we explicitly delete them.
