@@ -206,12 +206,20 @@ BEGIN
              SELECT s.gap_id, s.person_id, s.recid AS start_recid, e.recid AS end_recid, s.trip_date
              FROM starts s JOIN ends e ON e.gap_id=s.gap_id AND e.person_id=s.person_id AND e.trip_date=s.trip_date AND e.tripnum>=s.tripnum
            ), seq AS (
+             /* Use TOP 1 with gap filter to avoid multi-row scalar subquery errors */
              SELECT p.gap_id, p.person_id, p.start_recid, p.end_recid,
                     c.recid, c.depart_time, c.arrive_time, c.distance_miles,
                     MIN(c.depart_time) OVER(PARTITION BY p.gap_id,p.person_id,p.start_recid,p.end_recid) AS seq_start,
                     MAX(c.arrive_time) OVER(PARTITION BY p.gap_id,p.person_id,p.start_recid,p.end_recid) AS seq_end
              FROM pairs p
-             JOIN #self_candidates c ON c.gap_id=p.gap_id AND c.person_id=p.person_id AND c.trip_date=p.trip_date AND c.tripnum BETWEEN (SELECT tripnum FROM #self_candidates WHERE recid=p.start_recid) AND (SELECT tripnum FROM #self_candidates WHERE recid=p.end_recid)
+             JOIN #self_candidates c 
+               ON c.gap_id=p.gap_id 
+              AND c.person_id=p.person_id 
+              AND c.trip_date=p.trip_date 
+              AND c.tripnum BETWEEN 
+                    (SELECT TOP 1 sc.tripnum FROM #self_candidates sc WHERE sc.recid=p.start_recid AND sc.gap_id=p.gap_id ORDER BY sc.tripnum)
+                    AND 
+                    (SELECT TOP 1 sc.tripnum FROM #self_candidates sc WHERE sc.recid=p.end_recid AND sc.gap_id=p.gap_id ORDER BY sc.tripnum)
            ), agg AS (
              SELECT gap_id, person_id, start_recid, end_recid,
                     MIN(seq_start) AS seq_start, MAX(seq_end) AS seq_end,
@@ -339,108 +347,179 @@ BEGIN
     SELECT * INTO #dwell_stats FROM stats;
 
     ------------------------------------------------------------
-    -- Phase 4: Imputation (remaining gaps)
+    -- Phase 4: Imputation (remaining gaps) with prefilter + batching
+    -- 1) Prefilter gaps for feasibility (distance/time) similar to legacy function
+    -- 2) Prune mode profile (walk/bike/transit) by distance thresholds; fallback to driving
+    -- 3) Process in batches of 25 with a 250ms delay between batches
     ------------------------------------------------------------
     IF EXISTS (SELECT 1 FROM @gaps WHERE [status]=0)
     BEGIN
       DECLARE @R BIGINT = COALESCE(@Seed, ABS(CHECKSUM(NEWID())));
-      DECLARE @A BIGINT=1103515245,@C BIGINT=12345,@M BIGINT=2147483648;
+      DECLARE @A BIGINT=1103515245,@C BIGINT=12345,@M BIGINT=2147483648; -- LCG for deterministic sampling
       IF OBJECT_ID('tempdb..#imputed') IS NOT NULL DROP TABLE #imputed;
       CREATE TABLE #imputed(new_recid DECIMAL(19,0), gap_id INT);
 
-      DECLARE cur CURSOR LOCAL FAST_FORWARD FOR
-        SELECT gap_id, prior_recid, gap_start_time, gap_end_time, gap_start_lat, gap_start_lng, gap_end_lat, gap_end_lng,
-               prior_mode, next_mode, person_id, hhid, pernum
-        FROM @gaps WHERE [status]=0;
+      /* Prefilter candidate gaps into a work table (#imp_candidates) */
+      IF OBJECT_ID('tempdb..#imp_candidates') IS NOT NULL DROP TABLE #imp_candidates;
+      ;WITH base AS (
+        SELECT g.*, 
+               (g.gap_meters * 0.000621371) AS gap_miles,
+               DATEDIFF(MINUTE, g.gap_start_time, g.gap_end_time) AS window_minutes_calc,
+               CASE 
+                 WHEN EXISTS (SELECT 1 FROM HHSurvey.automodes    am WHERE am.mode_id = g.mode_imputed) THEN 25
+                 WHEN EXISTS (SELECT 1 FROM HHSurvey.transitmodes tm WHERE tm.mode_id = g.mode_imputed) THEN 12
+                 WHEN EXISTS (SELECT 1 FROM HHSurvey.bikemodes    bm WHERE bm.mode_id = g.mode_imputed) THEN 10
+                 WHEN g.mode_imputed = 1 THEN 3
+                 ELSE 25
+               END AS naive_speed_mph
+        FROM @gaps g
+        WHERE g.[status]=0
+          AND g.gap_start_lat IS NOT NULL AND g.gap_start_lng IS NOT NULL
+          AND g.gap_end_lat   IS NOT NULL AND g.gap_end_lng   IS NOT NULL
+      ), pre AS (
+        SELECT *,
+               CASE WHEN naive_speed_mph>0 THEN CEILING((gap_miles/naive_speed_mph)*60.0)+5 END AS naive_min_minutes,
+               window_minutes_calc - ISNULL(CEILING((gap_miles/NULLIF(naive_speed_mph,0))*60.0)+5, 999999) AS slack_minutes
+        FROM base
+      )
+      SELECT gap_id, prior_recid, person_id, hhid, pernum,
+             gap_start_time, gap_end_time, gap_start_lat, gap_start_lng, gap_end_lat, gap_end_lng,
+             gap_meters, gap_miles, window_minutes_calc AS window_minutes,
+             prior_mode, next_mode, mode_imputed,
+             naive_speed_mph, naive_min_minutes, slack_minutes
+      INTO #imp_candidates
+      FROM pre
+      WHERE naive_min_minutes IS NOT NULL
+        AND window_minutes_calc >= naive_min_minutes
+        AND gap_miles <= 50.0;  -- legacy upper bound
 
-      DECLARE @gap_id INT,@prior_recid DECIMAL(19,0),@gs DATETIME2,@ge DATETIME2,@olat FLOAT,@olng FLOAT,@dlat FLOAT,@dlng FLOAT,
-              @pmode INT,@nmode INT,@pid DECIMAL(19,0),@hhid DECIMAL(19,0),@pernum INT;
-      DECLARE @window INT,@sample_dwell INT,@mean FLOAT,@sd FLOAT,@route NVARCHAR(200),@comma INT,@dist FLOAT,@travel INT;
-      DECLARE @depart DATETIME2,@arrive DATETIME2,@mode INT,@Buffer INT=1;
-
-      OPEN cur; FETCH NEXT FROM cur INTO @gap_id,@prior_recid,@gs,@ge,@olat,@olng,@dlat,@dlng,@pmode,@nmode,@pid,@hhid,@pernum;
-      WHILE @@FETCH_STATUS = 0
+      IF EXISTS (SELECT 1 FROM #imp_candidates)
       BEGIN
-        SET @mode = CASE WHEN @pmode=@nmode THEN @pmode ELSE 995 END;
-        SET @window = DATEDIFF(MINUTE,@gs,@ge);
-
-        -- RNG uniforms
-        SET @R = (@A*@R+@C)%@M; DECLARE @u1 FLOAT = CAST(@R AS FLOAT)/@M;
-        SET @R = (@A*@R+@C)%@M; DECLARE @u2 FLOAT = CAST(@R AS FLOAT)/@M;
-        SET @R = (@A*@R+@C)%@M; DECLARE @u3 FLOAT = CAST(@R AS FLOAT)/@M;
-
-        SET @mean=NULL; SET @sd=NULL;
-        SELECT TOP 1 @mean=mean_dwell,@sd=NULLIF(stdev_dwell,0)
-        FROM #dwell_stats ds
-        WHERE ds.dest_purpose=(SELECT dest_purpose FROM HHSurvey.Trip WHERE recid=@prior_recid)
-        ORDER BY n DESC;
-        IF @mean IS NULL SELECT TOP 1 @mean=mean_dwell,@sd=NULLIF(stdev_dwell,0) FROM #dwell_stats ORDER BY n DESC;
-        IF @mean IS NULL SET @mean=10; IF @sd IS NULL SET @sd=@mean*0.25;
-        DECLARE @z FLOAT = (((@u1+@u2+@u3)/3.0)-0.5)*2; -- approx [-1,1]
-        SET @sample_dwell = CAST(ROUND(@mean + @z*@sd,0) AS INT); IF @sample_dwell<1 SET @sample_dwell=1;
-
-        DECLARE @profile NVARCHAR(15)=CASE
-          WHEN EXISTS (SELECT 1 FROM HHSurvey.automodes WHERE mode_id=@mode) THEN 'driving'
-          WHEN EXISTS (SELECT 1 FROM HHSurvey.transitmodes WHERE mode_id=@mode) THEN 'transit'
-          WHEN EXISTS (SELECT 1 FROM HHSurvey.bikemodes WHERE mode_id=@mode) THEN 'bicycling'
-          WHEN @mode=1 THEN 'walking' ELSE 'driving' END;
-        SET @route = Elmer.dbo.route_mi_min(@olng,@olat,@dlng,@dlat,@profile,@GoogleKey,DATEADD(MINUTE,@window/2,@gs));
-        IF @route IS NULL GOTO NextImp;
-        SET @comma=CHARINDEX(',',@route);
-        SET @dist = TRY_CONVERT(FLOAT,LEFT(@route,@comma-1));
-        SET @travel = TRY_CONVERT(INT,ROUND(TRY_CONVERT(FLOAT,SUBSTRING(@route,@comma+1,50)),0));
-        IF @travel IS NULL OR @travel<=0 GOTO NextImp;
-
-        DECLARE @usable INT = @window - 2*@Buffer; IF @usable<1 SET @usable=1;
-        IF @travel >= @usable
+        DECLARE @BATCH_SIZE INT = 25;
+        WHILE EXISTS (SELECT 1 FROM #imp_candidates)
         BEGIN
-          SET @depart = DATEADD(MINUTE,@Buffer,@gs);
-          SET @arrive = DATEADD(MINUTE,-@Buffer,@ge);
-          IF DATEDIFF(MINUTE,@depart,@arrive)<1 SET @arrive=DATEADD(MINUTE,1,@depart);
-          SET @travel = DATEDIFF(MINUTE,@depart,@arrive);
-        END
-        ELSE IF (@sample_dwell + @travel) <= @usable
-        BEGIN
-          SET @depart = DATEADD(MINUTE,@Buffer+@sample_dwell,@gs);
-          SET @arrive = DATEADD(MINUTE,@travel,@depart);
-        END
-        ELSE
-        BEGIN
-          DECLARE @remain INT=@usable-@travel; IF @remain<1 SET @remain=1;
-          IF @sample_dwell>@remain SET @sample_dwell=@remain;
-          DECLARE @pre INT=@sample_dwell/2; DECLARE @post INT=@sample_dwell-@pre;
-          SET @depart=DATEADD(MINUTE,@Buffer+@pre,@gs);
-          SET @arrive=DATEADD(MINUTE,@travel,@depart);
-          DECLARE @latest DATETIME2=DATEADD(MINUTE,-@Buffer-@post,@ge);
-          IF @arrive>@latest BEGIN DECLARE @shift INT=DATEDIFF(MINUTE,@latest,@arrive); SET @depart=DATEADD(MINUTE,-@shift,@depart); SET @arrive=@latest; END
+          IF OBJECT_ID('tempdb..#imp_batch') IS NOT NULL DROP TABLE #imp_batch;
+          SELECT TOP (@BATCH_SIZE) *
+          INTO #imp_batch
+          FROM #imp_candidates
+          ORDER BY slack_minutes DESC, gap_miles ASC, person_id, gap_id;
+
+          /* Process this batch row-by-row using a cursor (simpler integration with existing dwell sampling code) */
+          DECLARE cur CURSOR LOCAL FAST_FORWARD FOR
+            SELECT gap_id, prior_recid, gap_start_time, gap_end_time, gap_start_lat, gap_start_lng, gap_end_lat, gap_end_lng,
+                   prior_mode, next_mode, person_id, hhid, pernum, gap_meters, gap_miles, mode_imputed
+            FROM #imp_batch;
+
+          DECLARE @gap_id INT,@prior_recid DECIMAL(19,0),@gs DATETIME2,@ge DATETIME2,@olat FLOAT,@olng FLOAT,@dlat FLOAT,@dlng FLOAT,
+                  @pmode INT,@nmode INT,@pid DECIMAL(19,0),@hhid DECIMAL(19,0),@pernum INT,
+                  @gap_meters FLOAT,@gap_miles FLOAT,@mode_imputed INT;
+
+          DECLARE @window INT,@sample_dwell INT,@mean FLOAT,@sd FLOAT,@route NVARCHAR(200),@comma INT,@dist FLOAT,@travel INT;
+          DECLARE @depart DATETIME2,@arrive DATETIME2,@mode INT,@Buffer INT=1;
+
+          OPEN cur; FETCH NEXT FROM cur INTO @gap_id,@prior_recid,@gs,@ge,@olat,@olng,@dlat,@dlng,@pmode,@nmode,@pid,@hhid,@pernum,@gap_meters,@gap_miles,@mode_imputed;
+          WHILE @@FETCH_STATUS = 0
+          BEGIN
+            /* Determine working mode (same as legacy: if prior==next else 995 placeholder) */
+            SET @mode = CASE WHEN @pmode=@nmode THEN @pmode ELSE 995 END;
+            SET @window = DATEDIFF(MINUTE,@gs,@ge);
+
+            /* RNG uniforms for dwell sampling */
+            SET @R = (@A*@R+@C)%@M; DECLARE @u1 FLOAT = CAST(@R AS FLOAT)/@M;
+            SET @R = (@A*@R+@C)%@M; DECLARE @u2 FLOAT = CAST(@R AS FLOAT)/@M;
+            SET @R = (@A*@R+@C)%@M; DECLARE @u3 FLOAT = CAST(@R AS FLOAT)/@M;
+
+            SET @mean=NULL; SET @sd=NULL;
+            SELECT TOP 1 @mean=mean_dwell,@sd=NULLIF(stdev_dwell,0)
+            FROM #dwell_stats ds
+            WHERE ds.dest_purpose=(SELECT dest_purpose FROM HHSurvey.Trip WHERE recid=@prior_recid)
+            ORDER BY n DESC;
+            IF @mean IS NULL SELECT TOP 1 @mean=mean_dwell,@sd=NULLIF(stdev_dwell,0) FROM #dwell_stats ORDER BY n DESC;
+            IF @mean IS NULL SET @mean=10; IF @sd IS NULL SET @sd=@mean*0.25;
+            DECLARE @z FLOAT = (((@u1+@u2+@u3)/3.0)-0.5)*2; -- approx [-1,1]
+            SET @sample_dwell = CAST(ROUND(@mean + @z*@sd,0) AS INT); IF @sample_dwell<1 SET @sample_dwell=1;
+
+            /* Prune routing profile by distance thresholds */
+            DECLARE @profile NVARCHAR(15);
+            IF @mode=1 AND @gap_miles <= 2.5
+              SET @profile='walking';
+            ELSE IF EXISTS (SELECT 1 FROM HHSurvey.bikemodes WHERE mode_id=@mode) AND @gap_miles <= 25.0
+              SET @profile='bicycling';
+            ELSE IF EXISTS (SELECT 1 FROM HHSurvey.transitmodes WHERE mode_id=@mode) AND @gap_miles <= 60.0
+              SET @profile='transit';
+            ELSE IF EXISTS (SELECT 1 FROM HHSurvey.automodes WHERE mode_id=@mode)
+              SET @profile='driving';
+            ELSE
+              SET @profile='driving'; -- fallback
+
+            /* Midpoint departure time for routing */
+            DECLARE @mid_depart DATETIME2 = DATEADD(MINUTE,@window/2,@gs);
+            SET @route = Elmer.dbo.route_mi_min(@olng,@olat,@dlng,@dlat,@profile,@GoogleKey,@mid_depart);
+            IF @route IS NULL GOTO NextImpBatch;
+            SET @comma=CHARINDEX(',',@route);
+            SET @dist = TRY_CONVERT(FLOAT,LEFT(@route,@comma-1));
+            SET @travel = TRY_CONVERT(INT,ROUND(TRY_CONVERT(FLOAT,SUBSTRING(@route,@comma+1,50)),0));
+            IF @travel IS NULL OR @travel<=0 GOTO NextImpBatch;
+
+            DECLARE @usable INT = @window - 2*@Buffer; IF @usable<1 SET @usable=1;
+            IF @travel >= @usable
+            BEGIN
+              SET @depart = DATEADD(MINUTE,@Buffer,@gs);
+              SET @arrive = DATEADD(MINUTE,-@Buffer,@ge);
+              IF DATEDIFF(MINUTE,@depart,@arrive)<1 SET @arrive=DATEADD(MINUTE,1,@depart);
+              SET @travel = DATEDIFF(MINUTE,@depart,@arrive);
+            END
+            ELSE IF (@sample_dwell + @travel) <= @usable
+            BEGIN
+              SET @depart = DATEADD(MINUTE,@Buffer+@sample_dwell,@gs);
+              SET @arrive = DATEADD(MINUTE,@travel,@depart);
+            END
+            ELSE
+            BEGIN
+              DECLARE @remain INT=@usable-@travel; IF @remain<1 SET @remain=1;
+              IF @sample_dwell>@remain SET @sample_dwell=@remain;
+              DECLARE @pre INT=@sample_dwell/2; DECLARE @post INT=@sample_dwell-@pre;
+              SET @depart=DATEADD(MINUTE,@Buffer+@pre,@gs);
+              SET @arrive=DATEADD(MINUTE,@travel,@depart);
+              DECLARE @latest DATETIME2=DATEADD(MINUTE,-@Buffer-@post,@ge);
+              IF @arrive>@latest BEGIN DECLARE @shift INT=DATEDIFF(MINUTE,@latest,@arrive); SET @depart=DATEADD(MINUTE,-@shift,@depart); SET @arrive=@latest; END
+            END
+
+            INSERT INTO HHSurvey.Trip(
+              hhid, person_id, pernum, tripnum, psrc_inserted, revision_code,
+              origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
+              depart_time_timestamp, arrival_time_timestamp, distance_miles, dest_purpose,
+              travelers_hh, travelers_nonhh, travelers_total, mode_1, modes, travel_time
+            )
+            OUTPUT inserted.recid,@gap_id INTO #imputed(new_recid,gap_id)
+            SELECT @hhid,@pid,@pernum,998,1,'16i,',
+                   @olat,@olng,geography::STGeomFromText('POINT('+CAST(@olng AS VARCHAR(20))+' '+CAST(@olat AS VARCHAR(20))+')',4326),
+                   @dlat,@dlng,geography::STGeomFromText('POINT('+CAST(@dlng AS VARCHAR(20))+' '+CAST(@dlat AS VARCHAR(20))+')',4326),
+                   @depart,@arrive,@dist,-9998,
+                   -9997,-9997,-9997,@mode,CAST(@mode AS NVARCHAR(10)),@travel
+            WHERE NOT EXISTS (
+              SELECT 1 FROM HHSurvey.Trip r
+              WHERE r.person_id=@pid AND r.depart_time_timestamp < @arrive AND r.arrival_time_timestamp > @depart);
+
+            IF EXISTS (SELECT 1 FROM #imputed WHERE gap_id=@gap_id)
+              UPDATE @gaps SET [status]=2 WHERE gap_id=@gap_id;
+            ELSE
+              UPDATE @gaps SET [status]=3 WHERE gap_id=@gap_id AND [status]=0;
+
+            NextImpBatch:
+            FETCH NEXT FROM cur INTO @gap_id,@prior_recid,@gs,@ge,@olat,@olng,@dlat,@dlng,@pmode,@nmode,@pid,@hhid,@pernum,@gap_meters,@gap_miles,@mode_imputed;
+          END
+          CLOSE cur; DEALLOCATE cur;
+
+          /* Remove processed rows from candidate list */
+          DELETE c FROM #imp_candidates c JOIN #imp_batch b ON b.gap_id=c.gap_id;
+
+          /* Batch throttle */
+          WAITFOR DELAY '00:00:00.250';
         END
 
-        INSERT INTO HHSurvey.Trip(
-          hhid, person_id, pernum, tripnum, psrc_inserted, revision_code,
-          origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
-          depart_time_timestamp, arrival_time_timestamp, distance_miles, dest_purpose,
-          travelers_hh, travelers_nonhh, travelers_total, mode_1, modes, travel_time
-        )
-        OUTPUT inserted.recid,@gap_id INTO #imputed(new_recid,gap_id)
-        SELECT @hhid,@pid,@pernum,998,1,'16i,',
-               @olat,@olng,geography::STGeomFromText('POINT('+CAST(@olng AS VARCHAR(20))+' '+CAST(@olat AS VARCHAR(20))+')',4326),
-               @dlat,@dlng,geography::STGeomFromText('POINT('+CAST(@dlng AS VARCHAR(20))+' '+CAST(@dlat AS VARCHAR(20))+')',4326),
-               @depart,@arrive,@dist,-9998,
-               -9997,-9997,-9997,@mode,CAST(@mode AS NVARCHAR(10)),@travel
-        WHERE NOT EXISTS (
-          SELECT 1 FROM HHSurvey.Trip r
-          WHERE r.person_id=@pid AND r.depart_time_timestamp < @arrive AND r.arrival_time_timestamp > @depart);
-
-        IF EXISTS (SELECT 1 FROM #imputed WHERE gap_id=@gap_id)
-          UPDATE @gaps SET [status]=2 WHERE gap_id=@gap_id;
-        ELSE
-          UPDATE @gaps SET [status]=3 WHERE gap_id=@gap_id AND [status]=0;
-
-        NextImp:
-        FETCH NEXT FROM cur INTO @gap_id,@prior_recid,@gs,@ge,@olat,@olng,@dlat,@dlng,@pmode,@nmode,@pid,@hhid,@pernum;
+        EXEC HHSurvey.tripnum_update;
       END
-      CLOSE cur; DEALLOCATE cur;
-      EXEC HHSurvey.tripnum_update;
     END
 
     ------------------------------------------------------------

@@ -3,31 +3,32 @@ GO
 SET ANSI_NULLS ON
 GO
 
-CREATE   VIEW [HHSurvey].[person_error_assignment] WITH SCHEMABINDING AS
+CREATE    VIEW [HHSurvey].[person_error_assignment] WITH SCHEMABINDING AS
 WITH FlagPriority AS (
     SELECT v.error_flag, v.priority
     FROM (VALUES
-        ('underage driver',1),
-        ('non-worker + work trip',2),
-        ('non-student + school trip',3),
-        ('starts, not from home',4),
-        ('ends day, not home',5),
-        ('same dest as prior',6),
-        ('mode_1 missing',7),
-        ('lone trip',8),
-        ('missing next trip link',9),
-        ('initial trip purpose missing',10),
-        ('time overlap',11),
-        ('no activity time after',12),
-        ('o purpose not equal to prior d purpose',13),
-        ('time overlap',14),
-        ('"change mode" purpose',15),       
-        ('purpose missing',16),
-        ('instantaneous',17),
-        ('excessive speed',18),
-        ('too slow',19),
-        ('purpose at odds w/ dest',20),
-        ('too long at dest?',21)
+        ('time overlap',1),
+        ('underage driver',2),
+        ('non-worker + work trip',3),
+        ('non-student + school trip',4),
+        ('starts, not from home',5),
+        ('ends day, not home',6),
+        ('same dest as prior',7),
+        ('mode_1 missing',8),
+        ('lone trip',9),
+        ('missing next trip link',10),
+        ('initial trip purpose missing',11),
+        ('time overlap',12),
+        ('no activity time after',13),
+        ('o purpose not equal to prior d purpose',14),
+        ('time overlap',15),
+        ('"change mode" purpose',16),       
+        ('purpose missing',17),
+        ('instantaneous',18),
+        ('excessive speed',19),
+        ('too slow',20),
+        ('purpose at odds w/ dest',21),
+        ('too long at dest?',22)
     ) v(error_flag, priority)
 ), PersonFlags AS (
     SELECT t.person_id,

@@ -223,13 +223,14 @@ BEGIN
 
     -- Compute transit bounds per linked trip
     DROP TABLE IF EXISTS #transit_bounds;
-    SELECT cm.person_id, cm.trip_link,
-           CASE WHEN COUNT(CASE WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.transitmodes) THEN 1 END) > 0 THEN 1 ELSE 0 END AS has_transit,
-           MIN(CASE WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.transitmodes) THEN component_order END) AS first_transit_order,
-           MAX(CASE WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.transitmodes) THEN component_order END) AS last_transit_order
-    INTO #transit_bounds
-    FROM #component_modes cm
-    GROUP BY cm.person_id, cm.trip_link;
+SELECT cm.person_id, cm.trip_link,
+       CASE WHEN COUNT(CASE WHEN tm.mode_id IS NOT NULL THEN 1 END) > 0 THEN 1 ELSE 0 END AS has_transit,
+       MIN(CASE WHEN tm.mode_id IS NOT NULL THEN component_order END) AS first_transit_order,
+       MAX(CASE WHEN tm.mode_id IS NOT NULL THEN component_order END) AS last_transit_order
+INTO #transit_bounds
+FROM #component_modes cm
+LEFT JOIN HHSurvey.transitmodes tm ON tm.mode_id = cm.mode_code
+GROUP BY cm.person_id, cm.trip_link;
 
     -- Access and egress mode selection (only when transit present)
     DROP TABLE IF EXISTS #ae_modes;
