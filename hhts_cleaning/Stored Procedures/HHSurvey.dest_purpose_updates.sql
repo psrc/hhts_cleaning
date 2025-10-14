@@ -8,9 +8,9 @@ GO
         UPDATE t--Classify home destinations
             SET t.dest_is_home = 1
             FROM HHSurvey.Trip AS t JOIN HHSurvey.household AS h ON t.hhid = h.hhid
-            WHERE t.dest_geog.STDistance(h.home_geog) < 100;
+            WHERE t.dest_geog.STDistance(h.home_geog) < 150;
 
-        UPDATE t --Classify home purposes where destination code is absent; 50m proximity to home location on file
+        UPDATE t --Classify home purposes where destination code is absent; 150m proximity to home location on file
             SET t.dest_purpose = 1, 
                 t.revision_code = CONCAT(t.revision_code,'5,') 
             FROM HHSurvey.Trip AS t JOIN HHSurvey.household AS h ON t.hhid = h.hhid
@@ -19,19 +19,19 @@ GO
         UPDATE t --Classify primary work destinations
             SET t.dest_is_work = 1
             FROM HHSurvey.Trip AS t JOIN HHSurvey.person AS p ON t.person_id = p.person_id AND p.employment > 1
-            WHERE t.dest_geog.STDistance(p.work_geog) < 100;
+            WHERE t.dest_geog.STDistance(p.work_geog) < 150;
 
-        UPDATE t --Classify work destinations where destination code is absent; 100m proximity to work location on file
+        UPDATE t --Classify work destinations where destination code is absent; 150m proximity to work location on file
             SET t.dest_purpose = 10, t.revision_code = CONCAT(t.revision_code,'5,')
             FROM HHSurvey.Trip AS t JOIN HHSurvey.person AS p ON t.person_id  = p.person_id AND p.employment > 1
             WHERE t.dest_is_work = 1 AND t.dest_purpose <> 10
                 AND t.dest_purpose in(SELECT flag_value FROM HHSurvey.NullFlags UNION SELECT 60 UNION SELECT 97);
 
-        UPDATE t --Classify school destinations where destination code is absent; 100m proximity to school location on file
+        UPDATE t --Classify school destinations where destination code is absent; 150m proximity to school location on file
             SET t.dest_purpose = CASE WHEN p.age_detailed < 5 THEN 26 WHEN p.age_detailed < 19 THEN 21 ELSE 22 END, t.revision_code = CONCAT(t.revision_code,'5,')
-            FROM HHSurvey.Trip AS t JOIN HHSurvey.person AS p ON t.person_id  = p.person_id AND p.student BETWEEN 2 and 7
+            FROM HHSurvey.Trip AS t JOIN HHSurvey.person AS p ON t.person_id  = p.person_id AND (p.age_detailed BETWEEN 5 and 18 OR p.student IN(4,5,6,7))
             WHERE t.dest_purpose in(SELECT flag_value FROM HHSurvey.NullFlags UNION SELECT 60 UNION SELECT 97)
-                AND t.dest_geog.STDistance(p.school_geog) < 100;		
+                AND t.dest_geog.STDistance(p.school_geog) < 150;		
 
         UPDATE t --revises purpose field for home return portion of a single stop loop trip 
             SET t.dest_purpose = 1, t.revision_code = CONCAT(t.revision_code,'1,')
@@ -44,8 +44,8 @@ GO
             FROM HHSurvey.Trip AS t
                 JOIN HHSurvey.person AS p ON t.person_id=p.person_id 
                 JOIN HHSurvey.Trip AS next_t ON t.person_id=next_t.person_id	AND t.tripnum + 1 = next_t.tripnum						
-            WHERE p.age_detailed > 4 
-                AND (p.student = 1 OR p.student IS NULL or p.student in (select distinct [flag_value] from HHSurvey.NullFlags)) 
+            WHERE p.age_detailed > 18 
+                AND p.student = 1 
                 and (t.dest_purpose IN(SELECT purpose_id FROM HHSurvey.ed_purposes) 
                     or t.dest_purpose in(SELECT flag_value FROM HHSurvey.NullFlags)
                     or t.dest_purpose=97
@@ -58,8 +58,8 @@ GO
             FROM HHSurvey.Trip AS t
                 JOIN HHSurvey.person AS p ON t.person_id=p.person_id 
                 JOIN HHSurvey.Trip AS next_t ON t.person_id=next_t.person_id	AND t.tripnum + 1 = next_t.tripnum						
-            WHERE p.age_detailed > 4 
-                AND (p.student = 1 OR p.student IS NULL or p.student in (SELECT flag_value FROM HHSurvey.NullFlags)) 
+            WHERE p.age_detailed > 18 
+                AND p.student = 1
                 and (t.dest_purpose IN(SELECT purpose_id FROM HHSurvey.ed_purposes)
                     or t.dest_purpose in(SELECT flag_value FROM HHSurvey.NullFlags)
                     or t.dest_purpose=97
@@ -92,8 +92,8 @@ GO
             FROM HHSurvey.Trip AS t
                 JOIN HHSurvey.person AS p ON t.person_id=p.person_id 
                 LEFT JOIN HHSurvey.Trip as next_t ON t.person_id=next_t.person_id AND t.tripnum + 1 = next_t.tripnum
-            WHERE p.age_detailed > 4 
-                AND (p.student = 1 OR p.student IS NULL or p.student in (select distinct [flag_value] from HHSurvey.NullFlags))
+            WHERE p.age_detailed > 18
+                AND p.student = 1
                 AND (t.travelers_total > 1 OR next_t.travelers_total > 1)
                 AND (t.dest_purpose IN(SELECT purpose_id FROM HHSurvey.ed_purposes)
                     --OR Elmer.dbo.rgx_find(t.dest_label,'(school|care)',1) = 1
