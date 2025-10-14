@@ -3,7 +3,7 @@ GO
 SET ANSI_NULLS ON
 GO
 
-CREATE   PROCEDURE [HHSurvey].[link_trips]
+CREATE    PROCEDURE [HHSurvey].[link_trips]
     @trip_ingredients HHSurvey.TripIngredientType READONLY
 AS
 BEGIN
@@ -232,51 +232,63 @@ FROM #component_modes cm
 LEFT JOIN HHSurvey.transitmodes tm ON tm.mode_id = cm.mode_code
 GROUP BY cm.person_id, cm.trip_link;
 
-    -- Access and egress mode selection (only when transit present)
-    DROP TABLE IF EXISTS #ae_modes;
-    SELECT tb.person_id, tb.trip_link,
-           acc.access_mode_code,
-           egr.egress_mode_code
-    INTO #ae_modes
-    FROM #transit_bounds tb
-    OUTER APPLY (
-        SELECT TOP 1 cm.mode_code AS access_mode_code
-        FROM #component_modes cm
-        WHERE cm.person_id = tb.person_id AND cm.trip_link = tb.trip_link
-          AND tb.has_transit = 1
-          AND cm.component_order < tb.first_transit_order
-          AND (
-                cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes)
-             OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes)
-             OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes)
-          )
-        ORDER BY CASE 
-                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes) THEN 1
-                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes) THEN 2
-                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes) THEN 3
-                    ELSE 4 END,
-                 cm.component_order,
-                 cm.position_in_component
-    ) acc
-    OUTER APPLY (
-        SELECT TOP 1 cm.mode_code AS egress_mode_code
-        FROM #component_modes cm
-        WHERE cm.person_id = tb.person_id AND cm.trip_link = tb.trip_link
-          AND tb.has_transit = 1
-          AND cm.component_order > tb.last_transit_order
-          AND (
-                cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes)
-             OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes)
-             OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes)
-          )
-        ORDER BY CASE 
-                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes) THEN 1
-                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes) THEN 2
-                    WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes) THEN 3
-                    ELSE 4 END,
-                 cm.component_order,
-                 cm.position_in_component
-    ) egr;
+     -- Access and egress mode selection (only when transit present)
+     DROP TABLE IF EXISTS #ae_modes;
+     SELECT tb.person_id, tb.trip_link,
+              acc.access_mode_code,
+              egr.egress_mode_code
+     INTO #ae_modes
+     FROM #transit_bounds tb
+     OUTER APPLY (
+          SELECT TOP 1 cm.mode_code AS access_mode_code
+          FROM #component_modes cm
+          WHERE cm.person_id = tb.person_id AND cm.trip_link = tb.trip_link
+             AND tb.has_transit = 1
+             AND cm.component_order < tb.first_transit_order
+             AND (
+                     cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes)
+                 OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes)
+                 OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes)
+             )
+          ORDER BY CASE 
+                          WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes) THEN 1
+                          WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes) THEN 2
+                          WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes) THEN 3
+                          ELSE 4 END,
+                      cm.component_order,
+                      cm.position_in_component
+     ) acc
+     OUTER APPLY (
+          SELECT TOP 1 cm.mode_code AS egress_mode_code
+          FROM #component_modes cm
+          WHERE cm.person_id = tb.person_id AND cm.trip_link = tb.trip_link
+             AND tb.has_transit = 1
+             AND cm.component_order > tb.last_transit_order
+             AND (
+                     cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes)
+                 OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes)
+                 OR cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes)
+             )
+          ORDER BY CASE 
+                          WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.automodes) THEN 1
+                          WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.bikemodes) THEN 2
+                          WHEN cm.mode_code IN (SELECT mode_id FROM HHSurvey.walkmodes) THEN 3
+                          ELSE 4 END,
+                      cm.component_order,
+                      cm.position_in_component
+     ) egr;
+
+     -- Add mode_in to mode_out mapping table
+     DECLARE @mode_in_out TABLE (mode_in INT, mode_out INT);
+     INSERT INTO @mode_in_out (mode_in, mode_out) VALUES
+          (1,1),
+          (995,995),
+          (100,13),
+          (101,14),
+          (103,2),
+          (104,97),
+          (106,12),
+          (107,9);
 
     -- Internal (or all, if no transit) distinct modes in order
     DROP TABLE IF EXISTS #internal_modes;
@@ -362,26 +374,34 @@ GROUP BY cm.person_id, cm.trip_link;
     FROM #transit_bounds tb
     LEFT JOIN drv ON drv.person_id = tb.person_id AND drv.trip_link = tb.trip_link;
 
-    -- Update trips with new mode fields
+    -- Update trips with new mode fields, mapping mode_acc and mode_egr through correspondence table
     UPDATE t
-        SET t.mode_acc = CASE 
-                            WHEN tb.has_transit = 1 AND cem.first_component_has_transit = 1 
-                                 AND cem.first_component_mode_acc NOT IN (NULL, 995, -9998, -9999) THEN cem.first_component_mode_acc
-                            WHEN tb.has_transit = 1 THEN COALESCE(ae.access_mode_code, 995)
-                            ELSE 995 END,
-            t.mode_egr = CASE 
-                            WHEN tb.has_transit = 1 AND cem.last_component_has_transit = 1 
-                                 AND cem.last_component_mode_egr NOT IN (NULL, 995, -9998, -9999) THEN cem.last_component_mode_egr
-                            WHEN tb.has_transit = 1 THEN COALESCE(ae.egress_mode_code, 995)
-                            ELSE 995 END,
+        SET t.mode_acc =
+                CASE 
+                    WHEN tb.has_transit = 1 AND cem.first_component_has_transit = 1 
+                         AND cem.first_component_mode_acc NOT IN (NULL, 995, -9998, -9999)
+                        THEN COALESCE((SELECT mode_out FROM @mode_in_out WHERE mode_in = cem.first_component_mode_acc), cem.first_component_mode_acc)
+                    WHEN tb.has_transit = 1
+                        THEN COALESCE((SELECT mode_out FROM @mode_in_out WHERE mode_in = ae.access_mode_code), ae.access_mode_code, 995)
+                    ELSE 995
+                END,
+            t.mode_egr =
+                CASE 
+                    WHEN tb.has_transit = 1 AND cem.last_component_has_transit = 1 
+                         AND cem.last_component_mode_egr NOT IN (NULL, 995, -9998, -9999)
+                        THEN COALESCE((SELECT mode_out FROM @mode_in_out WHERE mode_in = cem.last_component_mode_egr), cem.last_component_mode_egr)
+                    WHEN tb.has_transit = 1
+                        THEN COALESCE((SELECT mode_out FROM @mode_in_out WHERE mode_in = ae.egress_mode_code), ae.egress_mode_code, 995)
+                    ELSE 995
+                END,
             t.mode_1 = COALESCE((SELECT im.mode_code FROM #internal_modes im WHERE im.person_id = t.person_id AND im.trip_link = t.tripnum AND im.seq = 1), 995),
             t.mode_2 = COALESCE((SELECT im.mode_code FROM #internal_modes im WHERE im.person_id = t.person_id AND im.trip_link = t.tripnum AND im.seq = 2), 995),
             t.mode_3 = COALESCE((SELECT im.mode_code FROM #internal_modes im WHERE im.person_id = t.person_id AND im.trip_link = t.tripnum AND im.seq = 3), 995),
             t.mode_4 = COALESCE((SELECT im.mode_code FROM #internal_modes im WHERE im.person_id = t.person_id AND im.trip_link = t.tripnum AND im.seq = 4), 995),
-          t.modes = (SELECT STRING_AGG(CAST(am.mode_code AS varchar(10)), ',') 
+            t.modes = (SELECT STRING_AGG(CAST(am.mode_code AS varchar(10)), ',') 
                    FROM #all_modes am 
                    WHERE am.person_id = t.person_id AND am.trip_link = t.tripnum AND am.new_seq BETWEEN 1 AND 6),
-          t.driver = COALESCE(dr.final_driver, t.driver)
+            t.driver = COALESCE(dr.final_driver, t.driver)
     FROM HHSurvey.Trip t
     JOIN #linked_trips lt ON lt.person_id = t.person_id AND lt.trip_link = t.tripnum
     JOIN #transit_bounds tb ON tb.person_id = t.person_id AND tb.trip_link = t.tripnum

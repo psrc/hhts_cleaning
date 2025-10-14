@@ -90,13 +90,28 @@ BEGIN
              FROM pairs p
              JOIN #hh_candidates c ON c.gap_id=p.gap_id AND c.donor_person_id=p.donor_person_id
                AND c.depart_time>=p.seq_start AND c.arrive_time<=p.seq_end
-           ), aggregated AS (
+           ),
+           -- Exclude any sequence where any trip has dest_purpose=10
+           valid_sequences AS (
+             SELECT gap_id, donor_person_id, start_recid, end_recid
+             FROM seq_trips
+             GROUP BY gap_id, donor_person_id, start_recid, end_recid
+             HAVING SUM(CASE WHEN dest_purpose = 10 THEN 1 ELSE 0 END) = 0
+           ),
+           aggregated AS (
              SELECT gap_id, donor_person_id, start_recid, end_recid,
                     MIN(seq_start) AS seq_start, MAX(seq_end) AS seq_end,
                     COUNT(*) AS trip_count,
                     SUM(travelers_hh) AS travelers_hh_sum,
                     SUM(distance_miles) AS distance_sum
              FROM seq_trips
+             WHERE EXISTS (
+               SELECT 1 FROM valid_sequences v
+               WHERE v.gap_id = seq_trips.gap_id
+                 AND v.donor_person_id = seq_trips.donor_person_id
+                 AND v.start_recid = seq_trips.start_recid
+                 AND v.end_recid = seq_trips.end_recid
+             )
              GROUP BY gap_id, donor_person_id, start_recid, end_recid
            )
       INSERT INTO #hh_sequences

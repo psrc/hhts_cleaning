@@ -3,11 +3,11 @@ GO
 SET ANSI_NULLS ON
 GO
 
-CREATE    VIEW [HHSurvey].[person_error_assignment] WITH SCHEMABINDING AS
+CREATE   VIEW [HHSurvey].[person_error_assignment] WITH SCHEMABINDING AS
 WITH FlagPriority AS (
     SELECT v.error_flag, v.priority
     FROM (VALUES
-        ('time overlap',1),
+        ('initial trip purpose missing',1),
         ('underage driver',2),
         ('non-worker + work trip',3),
         ('non-student + school trip',4),
@@ -17,7 +17,6 @@ WITH FlagPriority AS (
         ('mode_1 missing',8),
         ('lone trip',9),
         ('missing next trip link',10),
-        ('initial trip purpose missing',11),
         ('time overlap',12),
         ('no activity time after',13),
         ('o purpose not equal to prior d purpose',14),

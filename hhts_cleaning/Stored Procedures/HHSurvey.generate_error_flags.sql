@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE    PROCEDURE [HHSurvey].[generate_error_flags] 
+CREATE   PROCEDURE [HHSurvey].[generate_error_flags] 
     @target_person_id decimal = NULL --If missing, generated for all records
 AS BEGIN
     SET NOCOUNT ON
@@ -146,9 +146,9 @@ AS BEGIN
 
         UNION ALL SELECT t19.recid, t19.person_id, t19.tripnum,	  		   			 		   	       'purpose at odds w/ dest' AS error_flag
             FROM trip_ref AS t19 JOIN hhts_cleaning.HHSurvey.Household AS h ON t19.hhid = h.hhid JOIN hhts_cleaning.HHSurvey.Person AS p ON t19.person_id = p.person_id
-            WHERE (t19.dest_purpose NOT IN(SELECT 1 UNION ALL SELECT purpose_id FROM HHSurvey.PUDO_purposes) and t19.dest_is_home = 1) OR 
-                  (t19.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.work_purposes) and t19.dest_is_work = 1)
-                AND h.home_geog.STDistance(p.work_geog) > 500
+            WHERE (t19.dest_is_home = 1 OR t19.dest_is_work = 1)
+                AND NOT ((t19.dest_purpose IN(SELECT 1 UNION ALL SELECT purpose_id FROM HHSurvey.PUDO_purposes) AND t19.dest_is_home = 1) OR 
+                         (t19.dest_purpose IN(SELECT purpose_id FROM HHSurvey.work_purposes) AND t19.dest_is_work = 1))
 
         UNION ALL SELECT t20.recid, t20.person_id, t20.tripnum,					                        'missing next trip link' AS error_flag
         FROM trip_ref AS t20 JOIN HHSurvey.Trip AS t_next ON  t20.person_id = t_next.person_id AND t20.tripnum + 1 = t_next.tripnum

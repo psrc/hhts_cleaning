@@ -53,11 +53,11 @@ BEGIN
         SELECT 1 FROM HHSurvey.Trip AS t2 WHERE t2.person_id = t.person_id GROUP BY t2.person_id HAVING COUNT(*) = 1
     );
 
-    -- Classify home-at-origin / home-at-destination using 50m proximity
+    -- Classify home-at-origin / home-at-destination using 150m proximity
     DROP TABLE IF EXISTS #single_trip_classified;
     SELECT s.*,
-           CASE WHEN s.origin_geog.STDistance(h.home_geog) < 50 THEN 1 ELSE 0 END AS origin_is_home,
-           CASE WHEN s.dest_geog.STDistance(h.home_geog)   < 50 THEN 1 ELSE 0 END AS dest_is_home
+           CASE WHEN s.origin_geog.STDistance(h.home_geog) < 150 THEN 1 ELSE 0 END AS origin_is_home,
+           CASE WHEN s.dest_geog.STDistance(h.home_geog)   < 150 THEN 1 ELSE 0 END AS dest_is_home
     INTO #single_trip_classified
     FROM #single_trip AS s
     JOIN HHSurvey.Household AS h ON s.hhid = h.hhid;
@@ -101,7 +101,7 @@ BEGIN
     SELECT d.recid,
            CASE 
              WHEN d.dest_purpose IN (SELECT purpose_id FROM HHSurvey.work_purposes) THEN 8*60
-             WHEN d.dest_purpose = 21 AND d.age_detailed < 19 AND d.dest_geog.STDistance(p.school_geog) < 50 THEN 390
+             WHEN d.dest_purpose = 21 AND d.age_detailed < 19 AND d.dest_geog.STDistance(p.school_geog) < 150 THEN 390
              WHEN d.dest_purpose = 33 THEN 30
              ELSE 60
            END AS dwell_min
@@ -162,7 +162,7 @@ BEGIN
         i.revision_code = CONCAT(i.revision_code,'19,')
     FROM HHSurvey.Trip AS i
     JOIN HHSurvey.Household AS h ON i.hhid = h.hhid
-    WHERE i.psrc_inserted = 1 AND i.dest_geog.STDistance(h.home_geog) < 50 AND (i.dest_purpose IS NULL OR i.dest_purpose <> 1);
+    WHERE i.psrc_inserted = 1 AND i.dest_geog.STDistance(h.home_geog) < 150 AND (i.dest_purpose IS NULL OR i.dest_purpose <> 1);
 
     -- For each case (a) person, find the just-inserted reverse trip (home->x), compute dwell, and shift its times earlier
     -- Identify inserted rows by person_id + psrc_inserted=1 + geometry match and by matching the pairing to the original recid
@@ -183,7 +183,7 @@ BEGIN
     SELECT ib.inserted_recid,
            CASE 
              WHEN it.dest_purpose IN (SELECT purpose_id FROM HHSurvey.work_purposes) THEN 8*60
-             WHEN it.dest_purpose = 21 AND p.age_detailed < 19 AND it.dest_geog.STDistance(p.school_geog) < 50 THEN 390
+             WHEN it.dest_purpose = 21 AND p.age_detailed < 19 AND it.dest_geog.STDistance(p.school_geog) < 150 THEN 390
              WHEN it.dest_purpose = 33 THEN 30
              ELSE 60
            END AS dwell_min
