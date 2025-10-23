@@ -5,8 +5,7 @@ GO
 
 CREATE   PROCEDURE [HHSurvey].[insert_return_home]
     @target_recid int = NULL,
-    @startdatetime nvarchar(19) = NULL,
-    @GoogleKey nvarchar(100)
+    @startdatetime nvarchar(19) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -69,9 +68,9 @@ BEGIN
             TRY_CONVERT(float, Elmer.dbo.rgx_replace(r.api_response,'.*,(.*)$','$1',1)) AS api_minutes
         FROM cand AS c
         OUTER APPLY (
-            SELECT api_response = Elmer.dbo.route_mi_min(
-                    c.origin_geog.Long, c.origin_geog.Lat,
-                    c.home_geog.Long, c.home_geog.Lat,
+            SELECT api_response = Elmer.dbo.route_miles_minutes(
+                    c.origin_geog,
+                    c.home_geog,
                     CASE
                         WHEN c.mode_1 = 1 THEN 'walking'
                         WHEN c.mode_1 IN (SELECT mode_id FROM HHSurvey.automodes) THEN 'driving'
@@ -79,7 +78,6 @@ BEGIN
                         WHEN c.mode_1 IN (SELECT mode_id FROM HHSurvey.bikemodes) THEN 'cycling'
                         ELSE 'driving'
                     END,
-                    @GoogleKey,
                     c.depart_time_timestamp
                 )
         ) AS r;
