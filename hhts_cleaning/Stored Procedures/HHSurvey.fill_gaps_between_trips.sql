@@ -13,13 +13,15 @@ Tripnum placeholders before resequencing: HH=999, Self=997, Imputed=998
 Revision codes appended: '16d,' / '16s,' / '16i,'
 Assumptions: dest_is_home column exists; if not, home identified by dest_purpose=1.
 */
-CREATE   PROCEDURE [HHSurvey].[fill_gaps_between_trips]
+CREATE    PROCEDURE [HHSurvey].[fill_gaps_between_trips]
   @GoogleKey NVARCHAR(100),
   @Debug BIT = 0,
   @Seed BIGINT = NULL
+
 AS
 BEGIN
   SET NOCOUNT ON;
+  SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
   BEGIN TRY
 
     ------------------------------------------------------------
@@ -39,9 +41,9 @@ BEGIN
     ------------------------------------------------------------
     -- Phase 1: Household donor replication
     ------------------------------------------------------------
-    IF EXISTS (SELECT 1 FROM @gaps WHERE [status]=0)
+  IF EXISTS (SELECT 1 FROM @gaps WHERE [status]=0)
     BEGIN
-      DECLARE @AnchorHH INT = 150;
+      DECLARE @AnchorHH INT = 250;
       IF OBJECT_ID('tempdb..#hh_candidates') IS NOT NULL DROP TABLE #hh_candidates;
       CREATE TABLE #hh_candidates(
         gap_id INT, donor_person_id DECIMAL(19,0), recid DECIMAL(19,0), tripnum INT,
@@ -183,9 +185,9 @@ BEGIN
     ------------------------------------------------------------
     -- Phase 2: Self donor replication
     ------------------------------------------------------------
-    IF EXISTS (SELECT 1 FROM @gaps WHERE [status]=0)
+  IF EXISTS (SELECT 1 FROM @gaps WHERE [status]=0)
     BEGIN
-      DECLARE @AnchorSelf INT = 150;
+      DECLARE @AnchorSelf INT = 250;
       IF OBJECT_ID('tempdb..#self_candidates') IS NOT NULL DROP TABLE #self_candidates;
       CREATE TABLE #self_candidates(
         gap_id INT, person_id DECIMAL(19,0), recid DECIMAL(19,0), tripnum INT,
@@ -367,7 +369,7 @@ BEGIN
     -- 2) Prune mode profile (walk/bike/transit) by distance thresholds; fallback to driving
     -- 3) Process in batches of 25 with a 250ms delay between batches
     ------------------------------------------------------------
-    IF EXISTS (SELECT 1 FROM @gaps WHERE [status]=0)
+  IF EXISTS (SELECT 1 FROM @gaps WHERE [status]=0)
     BEGIN
       DECLARE @R BIGINT = COALESCE(@Seed, ABS(CHECKSUM(NEWID())));
       DECLARE @A BIGINT=1103515245,@C BIGINT=12345,@M BIGINT=2147483648; -- LCG for deterministic sampling

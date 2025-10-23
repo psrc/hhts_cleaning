@@ -35,13 +35,13 @@ CREATE TABLE [HHSurvey].[removed_trip]
 [origin_purpose] [int] NULL,
 [dest_purpose] [int] NULL,
 [dest_purpose_other] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[mode_1] [int] NULL,
+[mode_1] [int] NOT NULL,
 [mode_2] [int] NULL,
 [mode_3] [int] NULL,
 [mode_4] [int] NULL,
-[driver] [smallint] NULL,
-[mode_acc] [smallint] NULL,
-[mode_egr] [smallint] NULL,
+[driver] [int] NULL,
+[mode_acc] [int] NULL,
+[mode_egr] [int] NULL,
 [speed_mph] [float] NULL,
 [mode_other_specify] [nvarchar] (1000) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [origin_geog] [sys].[geography] NULL,
@@ -51,9 +51,7 @@ CREATE TABLE [HHSurvey].[removed_trip]
 [modes] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [psrc_inserted] [bit] NULL,
 [revision_code] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[psrc_resolved] [smallint] NULL,
-[psrc_comment] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[valid_from] [datetime2] NOT NULL,
-[valid_to] [datetime2] NOT NULL
+[psrc_resolved] [int] NULL,
+[psrc_comment] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL
 ) ON [PRIMARY]
 GO
