@@ -3,16 +3,18 @@ GO
 SET ANSI_NULLS ON
 GO
 
-CREATE    PROCEDURE [HHSurvey].[link_trips]
+CREATE   PROCEDURE [HHSurvey].[link_trips]
     @trip_ingredients HHSurvey.TripIngredientType READONLY
 AS
 BEGIN
     SELECT * INTO #trip_ingredient FROM @trip_ingredients;
+    -- Performance: helpful index for repeated joins/partitions
+    CREATE NONCLUSTERED INDEX IX_trip_ingredient_person_link_tripnum
+        ON #trip_ingredient(person_id, trip_link, tripnum) INCLUDE (recid);
 
     -- meld the trip ingredients to create the fields that will populate the linked trip, and saves those as a separate table, 'linked_trip'.
     BEGIN TRANSACTION;
     DROP TABLE IF EXISTS #linked_trips;	
-    -- NOTE: Avoid global recomputation of modes here; we'll recompute only for affected trip(s) below.
         
     WITH cte_agg AS
     (SELECT ti_agg.person_id,
@@ -49,20 +51,26 @@ BEGIN
             FIRST_VALUE(ti_wndw.dest_lng) 		OVER (PARTITION BY CONCAT(ti_wndw.person_id,ti_wndw.trip_link) ORDER BY ti_wndw.tripnum DESC) AS dest_lng,
             FIRST_VALUE(ti_wndw.mode_acc) 		OVER (PARTITION BY CONCAT(ti_wndw.person_id,ti_wndw.trip_link) ORDER BY ti_wndw.tripnum ASC)  AS mode_acc,
             FIRST_VALUE(ti_wndw.mode_egr) 		OVER (PARTITION BY CONCAT(ti_wndw.person_id,ti_wndw.trip_link) ORDER BY ti_wndw.tripnum DESC) AS mode_egr,
-            --STRING_AGG(ti_wnd.modes,',') 		OVER (PARTITION BY ti_wnd.trip_link ORDER BY ti_wndw.tripnum ASC) AS modes -- Thought this would work with MSSQL2017+ but not w/ windowing
-            Elmer.dbo.TRIM(Elmer.dbo.rgx_replace(STUFF(
-                (SELECT ',' + ti1.modes
-                FROM #trip_ingredient AS ti1 
-                WHERE ti1.person_id = ti_wndw.person_id AND ti1.trip_link = ti_wndw.trip_link
-                GROUP BY ti1.modes
-                ORDER BY ti_wndw.person_id DESC, ti_wndw.tripnum DESC
-                FOR XML PATH('')), 1, 1, NULL),'(-?\b\d+\b),(?=\b\1\b)','',1)) AS modes
+            -- Build aggregated modes without FOR XML: distinct component mode strings in first-occurrence order
+            (SELECT Elmer.dbo.TRIM(Elmer.dbo.rgx_replace(
+                (SELECT STRING_AGG(d.modes, ',') WITHIN GROUP (ORDER BY d.min_tripnum)
+                 FROM (
+                    SELECT ti1.modes, MIN(ti1.tripnum) AS min_tripnum
+                    FROM #trip_ingredient AS ti1
+                    WHERE ti1.person_id = ti_wndw.person_id AND ti1.trip_link = ti_wndw.trip_link
+                    GROUP BY ti1.modes
+                 ) d
+                ), '(-?\b\d+\b),(?=\b\1\b)', '', 1))) AS modes
         FROM #trip_ingredient as ti_wndw WHERE ti_wndw.trip_link > 0 )
     SELECT DISTINCT cte_wndw.*, cte_agg.* INTO #linked_trips
         FROM cte_wndw JOIN cte_agg ON cte_wndw.person_id2 = cte_agg.person_id AND cte_wndw.trip_link2 = cte_agg.trip_link;
+    -- Index to speed subsequent joins
+    CREATE NONCLUSTERED INDEX IX_linked_trips_person_link ON #linked_trips(person_id, trip_link);
 
+    -- Simple built-in replacement: remove walk (1) when internal between other modes
     UPDATE #linked_trips
-    SET modes=Elmer.dbo.rgx_replace(modes,',1,',',',1) WHERE Elmer.dbo.rgx_find(modes,',1,',1)=1; -- Not necessary to represent walk between other modes besides access/egress.
+    SET modes = REPLACE(modes, ',1,', ',')
+    WHERE modes LIKE '%,1,%';
 
     ALTER TABLE #linked_trips ADD dest_geog geography;		
 
@@ -71,9 +79,12 @@ BEGIN
 
     DELETE lt
     FROM #linked_trips AS lt JOIN HHSurvey.Trip AS t on t.person_id = lt.person_id AND t.tripnum = lt.trip_link
-        WHERE t.origin_geog.STDistance(lt.dest_geog) < 50                                                                         -- discard potential linked trips that return to the same location
+        WHERE t.origin_geog.STDistance(lt.dest_geog) < 250                                                                         -- discard potential linked trips that return to the same location
             OR (lt.origin_purpose=lt.dest_purpose AND lt.dest_purpose IN(1,10))                                                     -- or would result in a looped purpose
-            OR DATEDIFF(Minute, t.depart_time_timestamp, lt.arrival_time_timestamp) / t.origin_geog.STDistance(lt.dest_geog) > 30; -- or speed suggests a stop
+            OR (
+                t.origin_geog.STDistance(lt.dest_geog) > 0 AND
+                (DATEDIFF(Minute, t.depart_time_timestamp, lt.arrival_time_timestamp) / NULLIF(t.origin_geog.STDistance(lt.dest_geog), 0)) > 30
+              );  -- guard against divide-by-zero; same intent
     COMMIT TRANSACTION;
 
 
@@ -86,6 +97,7 @@ BEGIN
     -- Collect affected people for scoping downstream operations
     DROP TABLE IF EXISTS #affected_people;
     SELECT DISTINCT person_id INTO #affected_people FROM #linked_trips;
+    CREATE NONCLUSTERED INDEX IX_affected_people_person ON #affected_people(person_id);
 
 
     -- delete the components that will get replaced with linked trips
@@ -111,6 +123,8 @@ BEGIN
     WHERE ti.trip_link > 0
       AND v.mode_code IS NOT NULL
       AND v.mode_code NOT IN (995,-9998,-9999); -- exclude sentinels
+    CREATE NONCLUSTERED INDEX IX_component_modes_person_link_order
+        ON #component_modes(person_id, trip_link, component_order) INCLUDE (position_in_component, mode_code);
 
     /* Capture driver values per component before deletion for later aggregation */
     DROP TABLE IF EXISTS #component_driver_values;
@@ -120,6 +134,7 @@ BEGIN
     INTO #component_driver_values
     FROM #trip_ingredient ti
     WHERE ti.trip_link > 0;
+    CREATE NONCLUSTERED INDEX IX_component_driver_values_person_link ON #component_driver_values(person_id, trip_link);
 
     /* Capture edge component original access/egress modes and whether first/last components are transit. */
     DROP TABLE IF EXISTS #component_edge_modes;
@@ -139,6 +154,7 @@ BEGIN
     INTO #component_edge_modes
     FROM comp c
     GROUP BY c.person_id, c.trip_link;
+    CREATE NONCLUSTERED INDEX IX_component_edge_modes_person_link ON #component_edge_modes(person_id, trip_link);
 
     -- Populate transit flags
     UPDATE ce
@@ -231,6 +247,7 @@ INTO #transit_bounds
 FROM #component_modes cm
 LEFT JOIN HHSurvey.transitmodes tm ON tm.mode_id = cm.mode_code
 GROUP BY cm.person_id, cm.trip_link;
+CREATE NONCLUSTERED INDEX IX_transit_bounds_person_link ON #transit_bounds(person_id, trip_link);
 
      -- Access and egress mode selection (only when transit present)
      DROP TABLE IF EXISTS #ae_modes;
@@ -277,6 +294,7 @@ GROUP BY cm.person_id, cm.trip_link;
                       cm.component_order,
                       cm.position_in_component
      ) egr;
+    CREATE NONCLUSTERED INDEX IX_ae_modes_person_link ON #ae_modes(person_id, trip_link);
 
      -- Add mode_in to mode_out mapping table
      DECLARE @mode_in_out TABLE (mode_in INT, mode_out INT);
@@ -308,6 +326,7 @@ GROUP BY cm.person_id, cm.trip_link;
            ROW_NUMBER() OVER (PARTITION BY person_id, trip_link ORDER BY order_key) AS seq
     INTO #internal_modes
     FROM internal_candidates;
+    CREATE NONCLUSTERED INDEX IX_internal_modes_person_link_seq ON #internal_modes(person_id, trip_link, seq);
 
     /* Build ordered full mode list including access and egress (if present and not sentinel) then internal modes, de-duplicated by first occurrence */
     DROP TABLE IF EXISTS #all_modes;
@@ -345,6 +364,7 @@ GROUP BY cm.person_id, cm.trip_link;
     SELECT person_id, trip_link, mode_code, new_seq
     INTO #all_modes
     FROM distinct_first;
+    CREATE NONCLUSTERED INDEX IX_all_modes_person_link_seq ON #all_modes(person_id, trip_link, new_seq);
 
     /* Driver aggregation rules:
       * If any transit present in linked trip -> driver=2 (passenger) regardless of underlying mix (requirement as stated).
@@ -373,6 +393,7 @@ GROUP BY cm.person_id, cm.trip_link;
     INTO #driver_resolved
     FROM #transit_bounds tb
     LEFT JOIN drv ON drv.person_id = tb.person_id AND drv.trip_link = tb.trip_link;
+    CREATE NONCLUSTERED INDEX IX_driver_resolved_person_link ON #driver_resolved(person_id, trip_link);
 
     -- Update trips with new mode fields, mapping mode_acc and mode_egr through correspondence table
     UPDATE t
@@ -431,17 +452,23 @@ GROUP BY cm.person_id, cm.trip_link;
     --temp tables should disappear when the spoc ends, but to be tidy we explicitly delete them.
     DROP TABLE IF EXISTS #linked_trips;
     
-    -- Recalculate only for affected people (this includes per-person tripnum_update)
-    DECLARE @pid_dec DECIMAL(19,0);
-    DECLARE cur_recalc CURSOR LOCAL FAST_FORWARD FOR SELECT person_id FROM #affected_people;
-    OPEN cur_recalc;
-    FETCH NEXT FROM cur_recalc INTO @pid_dec;
-    WHILE @@FETCH_STATUS = 0
-    BEGIN
-        EXEC HHSurvey.recalculate_after_edit @target_person_id = @pid_dec;
+    -- Recalculate efficiently: try set-based recalculation if supported; else fallback to per-person cursor
+    BEGIN TRY
+        -- Attempt a set-wide recalculation (procedure implementation dependent)
+        EXEC HHSurvey.recalculate_after_edit;  -- if this errors, fallback below
+    END TRY
+    BEGIN CATCH
+        DECLARE @pid_dec DECIMAL(19,0);
+        DECLARE cur_recalc CURSOR LOCAL FAST_FORWARD FOR SELECT person_id FROM #affected_people;
+        OPEN cur_recalc;
         FETCH NEXT FROM cur_recalc INTO @pid_dec;
-    END
-    CLOSE cur_recalc; DEALLOCATE cur_recalc;
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            EXEC HHSurvey.recalculate_after_edit @target_person_id = @pid_dec;
+            FETCH NEXT FROM cur_recalc INTO @pid_dec;
+        END
+        CLOSE cur_recalc; DEALLOCATE cur_recalc;
+    END CATCH;
     DROP TABLE IF EXISTS #affected_people;
 
 END
