@@ -2,8 +2,8 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE    PROCEDURE [HHSurvey].[impute_missing_mode]
-    @google_key               nvarchar(256) = NULL,
+CREATE     PROCEDURE [HHSurvey].[impute_missing_mode]
+    @GoogleKey                nvarchar(256) = NULL,
     @max_api_calls_per_run    int           = 2000,
     @radius_meters            int           = 150,
     @allow_low_confidence     bit           = 0,
@@ -589,7 +589,7 @@ BEGIN
       AND NOT EXISTS (SELECT 1 FROM #decisions d WHERE d.recid=fc.recid);
 
     /* API tie-breaker for remaining with 2-3 families (use personal gates); include departure time */
-    IF @google_key IS NOT NULL AND @max_api_calls_per_run > 0
+    IF @GoogleKey IS NOT NULL AND @max_api_calls_per_run > 0
     BEGIN
         IF OBJECT_ID('tempdb..#api_queue') IS NOT NULL DROP TABLE #api_queue;
         CREATE TABLE #api_queue (
@@ -650,7 +650,7 @@ BEGIN
 
                 IF @drive = 1 BEGIN
                     DECLARE @r_driving nvarchar(200), @p_driving int;
-                    SELECT @r_driving = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'driving', @google_key, @depart);
+                    SELECT @r_driving = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'driving', @GoogleKey, @depart);
                     SET @p_driving = CHARINDEX(',', @r_driving);
                     IF @p_driving > 0
                         SELECT @drive_min = TRY_CONVERT(float, LTRIM(RTRIM(SUBSTRING(@r_driving, @p_driving+1, 4000))));
@@ -660,7 +660,7 @@ BEGIN
                 END
                 IF @transit = 1 AND @calls_used < @max_api_calls_per_run BEGIN
                     DECLARE @r_transit nvarchar(200), @p_transit int;
-                    SELECT @r_transit = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'transit', @google_key, @depart);
+                    SELECT @r_transit = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'transit', @GoogleKey, @depart);
                     SET @p_transit = CHARINDEX(',', @r_transit);
                     IF @p_transit > 0
                         SELECT @transit_min = TRY_CONVERT(float, LTRIM(RTRIM(SUBSTRING(@r_transit, @p_transit+1, 4000))));
@@ -671,7 +671,7 @@ BEGIN
                 IF @bike = 1 AND @calls_used < @max_api_calls_per_run BEGIN
                     -- Skip biking if distance obviously too long: rely on queue prefilter; still allow
                     DECLARE @r_bike nvarchar(200), @p_bike int;
-                    SELECT @r_bike = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'bicycling', @google_key, @depart);
+                    SELECT @r_bike = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'bicycling', @GoogleKey, @depart);
                     SET @p_bike = CHARINDEX(',', @r_bike);
                     IF @p_bike > 0
                         SELECT @bike_min = TRY_CONVERT(float, LTRIM(RTRIM(SUBSTRING(@r_bike, @p_bike+1, 4000))));
@@ -681,7 +681,7 @@ BEGIN
                 END
                 IF @walk = 1 AND @calls_used < @max_api_calls_per_run BEGIN
                     DECLARE @r_walk nvarchar(200), @p_walk int;
-                    SELECT @r_walk = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'walking', @google_key, @depart);
+                    SELECT @r_walk = Elmer.dbo.route_mi_min(@o_lon, @o_lat, @d_lon, @d_lat, 'walking', @GoogleKey, @depart);
                     SET @p_walk = CHARINDEX(',', @r_walk);
                     IF @p_walk > 0
                         SELECT @walk_min = TRY_CONVERT(float, LTRIM(RTRIM(SUBSTRING(@r_walk, @p_walk+1, 4000))));

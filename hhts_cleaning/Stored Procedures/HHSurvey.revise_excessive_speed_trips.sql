@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE   PROCEDURE [HHSurvey].[revise_excessive_speed_trips] @GoogleKey nvarchar(100)
+CREATE    PROCEDURE [HHSurvey].[revise_excessive_speed_trips] @GoogleKey nvarchar(100)
 AS BEGIN
 
     IF @GoogleKey IS NULL OR LEN(@GoogleKey) < 10
@@ -56,7 +56,8 @@ BEGIN TRY
     INSERT INTO #tmpApiMiMin(tripid, origin_geog, dest_geog, distance_miles, revision_code, prev_arrival, depart, arrival, next_depart, query_mode)
     SELECT cte.*
     FROM cte
-    WHERE cte.origin_geog IS NOT NULL AND cte.dest_geog IS NOT NULL AND cte.origin_geog.STGeometryType() = 'Point' AND cte.dest_geog.STGeometryType() = 'Point' AND cte.origin_geog.Lat BETWEEN 45 AND 50
+    WHERE cte.tripid IS NOT NULL
+        AND cte.origin_geog IS NOT NULL AND cte.dest_geog IS NOT NULL AND cte.origin_geog.STGeometryType() = 'Point' AND cte.dest_geog.STGeometryType() = 'Point' AND cte.origin_geog.Lat BETWEEN 45 AND 50
         AND cte.origin_geog.Long BETWEEN -126 AND -117 
         AND cte.dest_geog.Lat BETWEEN 45 AND 50
         AND cte.dest_geog.Long BETWEEN -126 AND -117 

@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-    CREATE PROCEDURE [HHSurvey].[recalculate_after_edit]
+    CREATE   PROCEDURE [HHSurvey].[recalculate_after_edit]
         @target_person_id decimal = NULL --optional to limit to the record just edited 
     AS BEGIN
         SET NOCOUNT ON
@@ -31,7 +31,7 @@ GO
         UPDATE next_t SET
             next_t.origin_purpose = t.dest_purpose
             FROM HHSurvey.Trip AS t JOIN HHSurvey.Trip AS next_t ON t.person_id = next_t.person_id AND t.tripnum + 1 = next_t.tripnum
-            WHERE t.person_id = (CASE WHEN @target_person_id IS NULL THEN t.person_id ELSE @target_person_id END);
+            WHERE (@target_person_id IS NULL OR t.person_id = @target_person_id);
 
     END
 GO

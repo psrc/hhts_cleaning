@@ -50,18 +50,20 @@ AS BEGIN
                                       THEN DATEADD(Hour, -3, t_next.depart_time_timestamp) 
                                       ELSE t_next.depart_time_timestamp END)) = 1  -- or the next trip starts the next day after 3am)
             AND t1.dest_is_home IS NULL 
-            AND (t1.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.sleepstay_purposes) OR 
-                (t1.dest_purpose IN(SELECT purpose_id FROM HHSurvey.work_purposes UNION ALL SELECT purpose_id FROM HHSurvey.social_purposes) 
-                AND t_next.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.sleepstay_purposes))) --allow for graveyard shift work, activities that cross 3am boundary
-            --AND Elmer.dbo.rgx_find(t1.psrc_comment,'ADD RETURN HOME \d?\d:\d\d',1) = 0
+            AND (t1.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.sleepstay_purposes
+                              UNION ALL SELECT purpose_id FROM HHSurvey.work_purposes  --allow for graveyard shift work, activities that cross 3am boundary
+                              UNION ALL SELECT purpose_id FROM HHSurvey.social_purposes)
             AND t1.dest_geog.STDistance(h.home_geog) > 300
             AND NOT EXISTS (SELECT 1 FROM #dayends AS de WHERE t1.person_id = de.person_id AND t1.dest_geog.STDistance(de.loc_geog) < 300)
-            AND Elmer.dbo.rgx_find(t1.modes,'31',1) = 0		
+            AND Elmer.dbo.rgx_find(t1.modes,'31',1) = 0)	-- ignore anyone flying	
 
         UNION ALL SELECT t_next.recid, t_next.person_id, t_next.tripnum,	           		   		   'starts, not from home' AS error_flag
         FROM trip_ref AS t2 JOIN trip_ref AS t_next ON t2.person_id = t_next.person_id AND t2.tripnum + 1 = t_next.tripnum
             WHERE DATEDIFF(Day, t2.arrival_time_timestamp, t_next.depart_time_timestamp) = 1 -- t_next is first trip of the day
-                AND t2.dest_is_home IS NULL AND t2.origin_purpose NOT IN(SELECT purpose_id FROM HHSurvey.sleepstay_purposes)
+                AND t2.dest_is_home IS NULL 
+                AND t2.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.sleepstay_purposes 
+                                           UNION SELECT purpose_id FROM HHSurvey.social_purposes
+                                           UNION SELECT purpose_id from HHSurvey.work_purposes) -- Exempting shift work
                 AND DATEPART(Hour, t_next.depart_time_timestamp) > 1  -- Night owls typically home before 2am
 
             UNION ALL SELECT t3.recid, t3.person_id, t3.tripnum, 									       		 'purpose missing' AS error_flag
@@ -103,7 +105,8 @@ AS BEGIN
 
         UNION ALL SELECT  t11.recid,  t11.person_id,  t11.tripnum, 							 		 'non-worker + work trip' AS error_flag
             FROM trip_ref AS t11 JOIN hhts_cleaning.HHSurvey.Person AS p ON p.person_id= t11.person_id
-            WHERE p.employment IN(5,6,7) AND  t11.dest_purpose in(SELECT purpose_id FROM HHSurvey.work_purposes)
+            WHERE (p.employment IN(5,6,7) OR (p.age_detailed < 15 AND p.employment NOT IN(1,2,3,4)))
+            AND  t11.dest_purpose IN(10,11)
 
         UNION ALL SELECT t12.recid, t12.person_id, t12.tripnum, 												'instantaneous' AS error_flag
             FROM trip_ref AS t12	
@@ -143,9 +146,9 @@ AS BEGIN
 
         UNION ALL SELECT t19.recid, t19.person_id, t19.tripnum,	  		   			 		   	       'purpose at odds w/ dest' AS error_flag
             FROM trip_ref AS t19 JOIN hhts_cleaning.HHSurvey.Household AS h ON t19.hhid = h.hhid JOIN hhts_cleaning.HHSurvey.Person AS p ON t19.person_id = p.person_id
-            WHERE (t19.dest_purpose NOT IN(SELECT 1 UNION ALL SELECT purpose_id FROM HHSurvey.PUDO_purposes) and t19.dest_is_home = 1) OR 
-                  (t19.dest_purpose NOT IN(SELECT purpose_id FROM HHSurvey.work_purposes) and t19.dest_is_work = 1)
-                AND h.home_geog.STDistance(p.work_geog) > 500
+            WHERE (t19.dest_is_home = 1 OR t19.dest_is_work = 1)
+                AND NOT ((t19.dest_purpose IN(SELECT 1 UNION ALL SELECT purpose_id FROM HHSurvey.PUDO_purposes) AND t19.dest_is_home = 1) OR 
+                         (t19.dest_purpose IN(SELECT purpose_id FROM HHSurvey.work_purposes) AND t19.dest_is_work = 1))
 
         UNION ALL SELECT t20.recid, t20.person_id, t20.tripnum,					                        'missing next trip link' AS error_flag
         FROM trip_ref AS t20 JOIN HHSurvey.Trip AS t_next ON  t20.person_id = t_next.person_id AND t20.tripnum + 1 = t_next.tripnum
@@ -159,7 +162,7 @@ AS BEGIN
 
         UNION ALL SELECT t22.recid, t22.person_id, t22.tripnum,	              	 			 			 '"change mode" purpose' AS error_flag	
             FROM trip_ref AS t22 JOIN HHSurvey.Trip AS t_next ON t22.person_id = t_next.person_id AND  t22.tripnum + 1 = t_next.tripnum
-                WHERE t22.dest_purpose = 60 AND Elmer.dbo.rgx_find(t_next.modes,'(31|32)',1) = 0 AND Elmer.dbo.rgx_find(t22.modes,'(31|32)',1) = 0
+                WHERE t22.dest_purpose = 60 AND NOT (Elmer.dbo.rgx_find(t_next.modes,'(31|32|80|108)',1) = 1 OR Elmer.dbo.rgx_find(t22.modes,'(31|32|80|108)',1) = 1)
                 AND t22.travelers_total = t_next.travelers_total
 
 /*        UNION ALL SELECT t23.recid, t23.person_id, t23.tripnum,					          		  		'PUDO, no +/- travelers' AS error_flag
@@ -191,15 +194,15 @@ AS BEGIN
                             CASE WHEN t_next.recid IS NULL 
                                     THEN DATETIME2FROMPARTS(DATEPART(year, t24.arrival_time_timestamp),DATEPART(month, t24.arrival_time_timestamp),DATEPART(day, t24.arrival_time_timestamp),3,0,0,0,0) 
                                     ELSE t_next.depart_time_timestamp END) > 480)
-                    OR  (t24.dest_purpose IN (SELECT purpose_id FROM HHSurvey.PUDO_purposes) 	
+                    OR  (t24.dest_purpose IN (45, 46, 48) 	
                     AND DATEDIFF(Minute, t24.arrival_time_timestamp, 
                             CASE WHEN t_next.recid IS NULL 
                                     THEN DATETIME2FROMPARTS(DATEPART(year, t24.arrival_time_timestamp),DATEPART(month, t24.arrival_time_timestamp),DATEPART(day, t24.arrival_time_timestamp),3,0,0,0,0) 
-                                    ELSE t_next.depart_time_timestamp END) > 35)    
+                                    ELSE t_next.depart_time_timestamp END) > 210)    
 
         UNION ALL SELECT t25.recid, t25.person_id, t25.tripnum, 		  				   		          'non-student + school trip' AS error_flag
             FROM trip_ref AS t25 JOIN HHSurvey.Trip as t_next ON t25.person_id = t_next.person_id AND t25.tripnum + 1 = t_next.tripnum JOIN hhts_cleaning.HHSurvey.Person ON t25.person_id=person.person_id 					
-            WHERE t25.dest_purpose IN(SELECT purpose_id FROM HHSurvey.ed_purposes)		
+            WHERE t25.dest_purpose IN(21,22)		
                 AND (person.student=1) AND person.age_detailed > 17					
             )
 

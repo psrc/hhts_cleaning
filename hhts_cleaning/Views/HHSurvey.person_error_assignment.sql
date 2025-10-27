@@ -7,26 +7,27 @@ CREATE   VIEW [HHSurvey].[person_error_assignment] WITH SCHEMABINDING AS
 WITH FlagPriority AS (
     SELECT v.error_flag, v.priority
     FROM (VALUES
-        ('"change mode" purpose',1),
-        ('lone trip',2),
-        ('purpose missing',3),
-        ('mode_1 missing',4),
-        ('time overlap',5),
-        ('instantaneous',6),
-        ('excessive speed',7),
-        ('too slow',8),
-        ('same dest as prior',9),
-        ('purpose at odds w/ dest',10),
-        ('too long at dest?',11),
-        ('o purpose not equal to prior d purpose',12),
+        ('initial trip purpose missing',1),
+        ('underage driver',2),
+        ('non-worker + work trip',3),
+        ('non-student + school trip',4),
+        ('starts, not from home',5),
+        ('ends day, not home',6),
+        ('same dest as prior',7),
+        ('mode_1 missing',8),
+        ('lone trip',9),
+        ('missing next trip link',10),
+        ('time overlap',12),
         ('no activity time after',13),
-        ('missing next trip link',14),
-        ('ends day, not home',15),
-        ('starts, not from home',16),
-        ('initial trip purpose missing',17),
-        ('non-student + school trip',18),
-        ('non-worker + work trip',19),
-        ('underage_detailed driver',20)
+        ('o purpose not equal to prior d purpose',14),
+        ('time overlap',15),
+        ('"change mode" purpose',16),       
+        ('purpose missing',17),
+        ('instantaneous',18),
+        ('excessive speed',19),
+        ('too slow',20),
+        ('purpose at odds w/ dest',21),
+        ('too long at dest?',22)
     ) v(error_flag, priority)
 ), PersonFlags AS (
     SELECT t.person_id,
@@ -43,6 +44,5 @@ FROM (
     FROM PersonFlags
  ) x
 WHERE rn = 1;
-
 
 GO

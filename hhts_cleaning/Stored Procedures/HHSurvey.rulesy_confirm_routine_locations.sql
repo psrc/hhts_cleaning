@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE PROCEDURE [HHSurvey].[rulesy_confirm_routine_locations]
+CREATE   PROCEDURE [HHSurvey].[rulesy_confirm_routine_locations]
 AS BEGIN
 
     BEGIN TRANSACTION;
@@ -103,7 +103,7 @@ AS BEGIN
             p.school_loc_lat = t.dest_lat,
             p.school_loc_lng = t.dest_lng 
         FROM HHSurvey.Person AS p JOIN #central_school_tripend AS te ON p.person_id = te.person_id JOIN HHSurvey.Trip AS t ON t.recid = te.recid
-        WHERE p.school_geog IS NULL AND (p.student IN(2,3) OR t.dest_purpose IN(SELECT flag_value FROM HHSurvey.NullFlags));
+        WHERE p.school_geog IS NULL AND (p.student<>1 OR t.dest_purpose IN(SELECT flag_value FROM HHSurvey.NullFlags));
 
     UPDATE p
         SET p.school_loc_lat = p.school_geog.Lat, 

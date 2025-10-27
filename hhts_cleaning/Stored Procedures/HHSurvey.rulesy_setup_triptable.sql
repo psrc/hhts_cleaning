@@ -105,57 +105,64 @@ AS BEGIN
                ,[mode_other_specify]
                               )
           SELECT
-               CAST(hhid AS decimal(19,0) )
-               ,CAST(person_id AS decimal(19,0) )
-               ,CAST(pernum AS [int])
-               ,CAST(tripid AS decimal(19,0))
-               ,CAST(tripnum AS [int])
-               ,convert(date, [travel_date], 121)
-               ,CAST(daynum AS [int])
-               ,DATETIME2FROMPARTS(CAST(LEFT(depart_date, 4) AS int), 
-                                CAST(SUBSTRING(CAST(depart_date AS nvarchar), 6, 2) AS int), 
-                                CAST(RIGHT(depart_date, 2) AS int), CAST(depart_time_hour AS int), 
-                                CAST(depart_time_minute AS int), 0, 0, 0)
-               ,DATETIME2FROMPARTS(CAST(LEFT(arrive_date, 4) AS int), 
-                                CAST(SUBSTRING(CAST(arrive_date AS nvarchar), 6, 2) AS int), 
-                                CAST(RIGHT(arrive_date, 2) AS int), 
-                                CAST(arrival_time_hour AS int), 
-                                CAST(arrival_time_minute AS int), 0, 0, 0)
-               ,CAST(origin_lat AS [float])
-               ,CAST(origin_lng AS [float])
-               ,CAST(dest_lat AS [float])
-               ,CAST(dest_lng AS [float])            
-               ,CAST(distance_miles AS [float])
-               ,CAST([duration_minutes] AS FLOAT) + [duration_seconds]/60
-               ,CAST(hhmember1 AS decimal(19,0))
-               ,CAST(hhmember2 AS decimal(19,0))
-               ,CAST(hhmember3 AS decimal(19,0))
-               ,CAST(hhmember4 AS decimal(19,0))
-               ,CAST(hhmember5 AS decimal(19,0))
-               ,CAST(hhmember6 AS decimal(19,0))
-               ,CAST(hhmember7 AS decimal(19,0))
-               ,CAST(hhmember8 AS decimal(19,0))
-               ,CAST(hhmember9 AS decimal(19,0))
-               ,CAST(hhmember10 AS decimal(19,0))
-               ,CAST(hhmember11 AS decimal(19,0))
-               ,CAST(hhmember12 AS decimal(19,0))
-               ,CAST(hhmember13 AS decimal(19,0))
-               ,CAST(COALESCE(travelers_hh,1) AS [int])
-               ,CAST(travelers_nonhh AS [int])
-               ,CAST(travelers_total AS [int])
-               ,CAST(origin_purpose AS [int])
-               ,CAST(dest_purpose AS [int])
-               ,CAST(dest_purpose_other AS nvarchar(255))
-               ,cast([mode_1] as int)
-               ,cast([mode_2] as int)
-               ,cast([mode_3] as int)
-               ,cast([mode_4] as int)
-               ,cast([driver] as int) 
-               ,cast([mode_acc] as int)
-               ,cast([mode_egr] as int)
-               ,CAST(speed_mph AS [float])
-               ,CAST(mode_other_specify as nvarchar(1000))
-               FROM HouseholdTravelSurvey2025.dbo.ex_trip_unlinked WHERE transit_quality_flag NOT IN('SA','SE')
+               CAST(t.hhid AS decimal(19,0) )
+               ,CAST(t.person_id AS decimal(19,0) )
+               ,CAST(t.pernum AS [int])
+               ,CAST(t.tripid AS decimal(19,0))
+               ,CAST(t.tripnum AS [int])
+               ,convert(date, t.travel_date, 121)
+               ,CAST(t.daynum AS [int])
+               ,DATETIME2FROMPARTS(CAST(LEFT(t.depart_date, 4) AS int), 
+                                CAST(SUBSTRING(CAST(t.depart_date AS nvarchar), 6, 2) AS int), 
+                                CAST(RIGHT(t.depart_date, 2) AS int), CAST(t.depart_time_hour AS int), 
+                                CAST(t.depart_time_minute AS int), 0, 0, 0)
+               ,DATETIME2FROMPARTS(CAST(LEFT(t.arrive_date, 4) AS int), 
+                                CAST(SUBSTRING(CAST(t.arrive_date AS nvarchar), 6, 2) AS int), 
+                                CAST(RIGHT(t.arrive_date, 2) AS int), 
+                                CAST(t.arrival_time_hour AS int), 
+                                CAST(t.arrival_time_minute AS int), 0, 0, 0)
+               ,CAST(t.origin_lat AS [float])
+               ,CAST(t.origin_lng AS [float])
+               ,CAST(t.dest_lat AS [float])
+               ,CAST(t.dest_lng AS [float])            
+               ,CAST(t.distance_miles AS [float])
+               ,CAST(t.duration_minutes AS FLOAT) + t.duration_seconds/60
+               ,CAST(t.hhmember1 AS decimal(19,0))
+               ,CAST(t.hhmember2 AS decimal(19,0))
+               ,CAST(t.hhmember3 AS decimal(19,0))
+               ,CAST(t.hhmember4 AS decimal(19,0))
+               ,CAST(t.hhmember5 AS decimal(19,0))
+               ,CAST(t.hhmember6 AS decimal(19,0))
+               ,CAST(t.hhmember7 AS decimal(19,0))
+               ,CAST(t.hhmember8 AS decimal(19,0))
+               ,CAST(t.hhmember9 AS decimal(19,0))
+               ,CAST(t.hhmember10 AS decimal(19,0))
+               ,CAST(t.hhmember11 AS decimal(19,0))
+               ,CAST(t.hhmember12 AS decimal(19,0))
+               ,CAST(t.hhmember13 AS decimal(19,0))
+               ,CAST(COALESCE(t.travelers_hh,1) AS [int])
+               ,CAST(t.travelers_nonhh AS [int])
+               ,CAST(t.travelers_total AS [int])
+               ,CAST(t.origin_purpose AS [int])
+               ,CAST(COALESCE(x.dest_purpose, t.dest_purpose) AS [int])
+               ,CAST(t.dest_purpose_other AS nvarchar(255))
+               ,cast(t.mode_1 as int)
+               ,cast(t.mode_2 as int)
+               ,cast(t.mode_3 as int)
+               ,cast(t.mode_4 as int)
+               ,cast(t.driver as int) 
+               ,cast(t.mode_acc as int)
+               ,cast(t.mode_egr as int)
+               ,CAST(t.speed_mph AS [float])
+               ,CAST(t.mode_other_specify as nvarchar(1000))
+               FROM HouseholdTravelSurvey2025.dbo.ex_trip_unlinked AS t
+               LEFT JOIN HouseholdTravelSurvey2025.dbo.ex_trip_linked AS x 
+                  ON t.linked_trip_id=x.linked_trip_id 
+                  AND t.arrive_date=x.arrive_date 
+                  AND t.arrival_time_hour=x.arrival_time_hour 
+                  AND t.arrival_time_minute=x.arrival_time_minute 
+                  AND t.arrival_time_second=x.arrival_time_second
+               WHERE transit_quality_flag NOT IN('SA','SE')
                ORDER BY tripid;
           COMMIT TRANSACTION;
 

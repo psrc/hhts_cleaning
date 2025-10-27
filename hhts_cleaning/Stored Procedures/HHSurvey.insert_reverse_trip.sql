@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-	CREATE   PROCEDURE [HHSurvey].[insert_reverse_trip]
+	CREATE    PROCEDURE [HHSurvey].[insert_reverse_trip]
 			@target_recid int, 
             @startdatetime nvarchar(19)
 
@@ -74,19 +74,19 @@ GO
                    t.origin_lng AS dest_lng, 
                    t.distance_miles,
                    cte.travel_time_elapsed AS travel_time,
-                   -992 AS hhmember1,
-                   -992 AS hhmember2,
-                   -992 AS hhmember3,
-                   -992 AS hhmember4,
-                   -992 AS hhmember5,
-                   -992 AS hhmember6,
-                   -992 AS hhmember7,
-                   -992 AS hhmember8,
-                   -992 AS hhmember9,
-                   -992 AS hhmember10,
-                   -992 AS hhmember11,
-                   -992 AS hhmember12,
-                   -992 AS hhmember13,
+                   995 AS hhmember1,
+                   995 AS hhmember2,
+                   995 AS hhmember3,
+                   995 AS hhmember4,
+                   995 AS hhmember5,
+                   995 AS hhmember6,
+                   995 AS hhmember7,
+                   995 AS hhmember8,
+                   995 AS hhmember9,
+                   995 AS hhmember10,
+                   995 AS hhmember11,
+                   995 AS hhmember12,
+                   995 AS hhmember13,
                    t.travelers_hh, 
                    t.travelers_nonhh, 
                    t.travelers_total,
@@ -96,7 +96,7 @@ GO
                    t.mode_2, 
                    t.mode_3, 
                    t.mode_4,
-                   -992 AS driver,
+                   995 AS driver,
                    t.mode_acc, 
                    t.mode_egr,
                    t.modes,

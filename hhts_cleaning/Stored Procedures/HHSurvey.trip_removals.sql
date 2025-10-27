@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-CREATE PROCEDURE [HHSurvey].[trip_removals]
+CREATE   PROCEDURE [HHSurvey].[trip_removals]
 AS BEGIN
 
 --This creates a table with the same structure as the Trip table
@@ -23,7 +23,7 @@ AS BEGIN
 	WITH cte AS (
 		SELECT t.recid 
 		FROM HHSurvey.Trip AS t 
-		WHERE t.distance_miles = 0 AND t.revision_code NOT LIKE '%8,%')
+		WHERE t.distance_miles = 0 AND (t.revision_code IS NULL OR t.revision_code NOT LIKE '%8,%'))
 	DELETE FROM HHSurvey.Trip OUTPUT deleted.* INTO HHSurvey.removed_trip
 		WHERE EXISTS (SELECT 1 FROM cte WHERE Trip.recid = cte.recid);
 	COMMIT TRANSACTION;
