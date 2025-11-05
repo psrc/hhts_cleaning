@@ -400,7 +400,8 @@ CREATE NONCLUSTERED INDEX IX_transit_bounds_person_link ON #transit_bounds(perso
         SET t.mode_acc =
                 CASE 
                     WHEN tb.has_transit = 1 AND cem.first_component_has_transit = 1 
-                         AND cem.first_component_mode_acc NOT IN (NULL, 995, -9998, -9999)
+                         AND cem.first_component_mode_acc IS NOT NULL 
+                         AND cem.first_component_mode_acc NOT IN (995, -9998, -9999)
                         THEN COALESCE((SELECT mode_out FROM @mode_in_out WHERE mode_in = cem.first_component_mode_acc), cem.first_component_mode_acc)
                     WHEN tb.has_transit = 1
                         THEN COALESCE((SELECT mode_out FROM @mode_in_out WHERE mode_in = ae.access_mode_code), ae.access_mode_code, 995)
@@ -409,7 +410,8 @@ CREATE NONCLUSTERED INDEX IX_transit_bounds_person_link ON #transit_bounds(perso
             t.mode_egr =
                 CASE 
                     WHEN tb.has_transit = 1 AND cem.last_component_has_transit = 1 
-                         AND cem.last_component_mode_egr NOT IN (NULL, 995, -9998, -9999)
+                         AND cem.last_component_mode_egr IS NOT NULL 
+                         AND cem.last_component_mode_egr NOT IN (995, -9998, -9999)
                         THEN COALESCE((SELECT mode_out FROM @mode_in_out WHERE mode_in = cem.last_component_mode_egr), cem.last_component_mode_egr)
                     WHEN tb.has_transit = 1
                         THEN COALESCE((SELECT mode_out FROM @mode_in_out WHERE mode_in = ae.egress_mode_code), ae.egress_mode_code, 995)
