@@ -1,4 +1,4 @@
-CREATE TABLE [History].[HHSurvey__Trip]
+CREATE TABLE [HHSurvey].[TripHistory]
 (
 [recid] [decimal] (19, 0) NOT NULL,
 [hhid] [decimal] (19, 0) NOT NULL,
@@ -35,13 +35,13 @@ CREATE TABLE [History].[HHSurvey__Trip]
 [origin_purpose] [int] NULL,
 [dest_purpose] [int] NULL,
 [dest_purpose_other] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[mode_1] [int] NULL,
+[mode_1] [int] NOT NULL,
 [mode_2] [int] NULL,
 [mode_3] [int] NULL,
 [mode_4] [int] NULL,
-[driver] [smallint] NULL,
-[mode_acc] [smallint] NULL,
-[mode_egr] [smallint] NULL,
+[driver] [int] NULL,
+[mode_acc] [int] NULL,
+[mode_egr] [int] NULL,
 [speed_mph] [float] NULL,
 [mode_other_specify] [nvarchar] (1000) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [origin_geog] [sys].[geography] NULL,
@@ -51,13 +51,13 @@ CREATE TABLE [History].[HHSurvey__Trip]
 [modes] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [psrc_inserted] [bit] NULL,
 [revision_code] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[psrc_resolved] [smallint] NULL,
+[psrc_resolved] [int] NULL,
 [psrc_comment] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[valid_from] [datetime2] NOT NULL,
-[valid_to] [datetime2] NOT NULL
+[ValidFrom] [datetime2] NOT NULL,
+[ValidTo] [datetime2] NOT NULL
 ) ON [PRIMARY]
 GO
-CREATE CLUSTERED INDEX [ix_HHSurvey__Trip] ON [History].[HHSurvey__Trip] ([valid_to], [valid_from]) ON [PRIMARY]
+CREATE CLUSTERED INDEX [ix_TripHistory] ON [HHSurvey].[TripHistory] ([ValidTo], [ValidFrom]) ON [PRIMARY]
 GO
 CREATE TABLE [HHSurvey].[Trip]
 (
@@ -66,7 +66,7 @@ CREATE TABLE [HHSurvey].[Trip]
 [person_id] [decimal] (19, 0) NOT NULL,
 [pernum] [int] NULL,
 [tripid] [decimal] (19, 0) NULL,
-[tripnum] [int] NOT NULL CONSTRAINT [DF__Trip__tripnum__31C3E6A2] DEFAULT ((0)),
+[tripnum] [int] NOT NULL CONSTRAINT [DF__Trip__tripnum__3DF4B35D] DEFAULT ((0)),
 [traveldate] [datetime2] NULL,
 [daynum] [int] NULL,
 [depart_time_timestamp] [datetime2] NULL,
@@ -96,13 +96,13 @@ CREATE TABLE [HHSurvey].[Trip]
 [origin_purpose] [int] NULL,
 [dest_purpose] [int] NULL,
 [dest_purpose_other] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[mode_1] [int] NULL,
+[mode_1] [int] NOT NULL,
 [mode_2] [int] NULL,
 [mode_3] [int] NULL,
 [mode_4] [int] NULL,
-[driver] [smallint] NULL,
-[mode_acc] [smallint] NULL,
-[mode_egr] [smallint] NULL,
+[driver] [int] NULL,
+[mode_acc] [int] NULL,
+[mode_egr] [int] NULL,
 [speed_mph] [float] NULL,
 [mode_other_specify] [nvarchar] (1000) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [origin_geog] [sys].[geography] NULL,
@@ -112,16 +112,16 @@ CREATE TABLE [HHSurvey].[Trip]
 [modes] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
 [psrc_inserted] [bit] NULL,
 [revision_code] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[psrc_resolved] [smallint] NULL,
+[psrc_resolved] [int] NULL,
 [psrc_comment] [nvarchar] (255) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
-[valid_from] [datetime2] GENERATED ALWAYS AS ROW START NOT NULL CONSTRAINT [HHSurvey_Trip_valid_from_default] DEFAULT (sysutcdatetime()),
-[valid_to] [datetime2] GENERATED ALWAYS AS ROW END NOT NULL CONSTRAINT [HHSurvey_Trip_valid_to_default] DEFAULT ('9999-12-31 23:59:59.9999999'),
-PERIOD FOR SYSTEM_TIME (valid_from, valid_to),
-CONSTRAINT [PK_recid] PRIMARY KEY CLUSTERED ([recid]) WITH (FILLFACTOR=80) ON [PRIMARY]
+[ValidFrom] [datetime2] GENERATED ALWAYS AS ROW START HIDDEN NOT NULL CONSTRAINT [DF__Trip__ValidFrom__43AD8CB3] DEFAULT (sysutcdatetime()),
+[ValidTo] [datetime2] GENERATED ALWAYS AS ROW END HIDDEN NOT NULL CONSTRAINT [DF__Trip__ValidTo__44A1B0EC] DEFAULT (CONVERT([datetime2],'9999-12-31 23:59:59.9999999')),
+PERIOD FOR SYSTEM_TIME (ValidFrom, ValidTo),
+CONSTRAINT [PK_trip_recid] PRIMARY KEY CLUSTERED ([recid]) WITH (FILLFACTOR=80) ON [PRIMARY]
 ) ON [PRIMARY]
 WITH
 (
-SYSTEM_VERSIONING = ON (HISTORY_TABLE = [History].[HHSurvey__Trip])
+SYSTEM_VERSIONING = ON (HISTORY_TABLE = [HHSurvey].[TripHistory])
 )
 GO
 CREATE NONCLUSTERED INDEX [dest_purpose_idx] ON [HHSurvey].[Trip] ([dest_purpose]) ON [PRIMARY]
@@ -131,8 +131,6 @@ GO
 CREATE NONCLUSTERED INDEX [person_timestamps] ON [HHSurvey].[Trip] ([person_id], [depart_time_timestamp], [arrival_time_timestamp]) ON [PRIMARY]
 GO
 CREATE NONCLUSTERED INDEX [person_tripnum_idx] ON [HHSurvey].[Trip] ([person_id], [tripnum]) ON [PRIMARY]
-GO
-CREATE NONCLUSTERED INDEX [IX_Trip_recid_person] ON [HHSurvey].[Trip] ([recid], [person_id]) ON [PRIMARY]
 GO
 CREATE NONCLUSTERED INDEX [travelers_total_idx] ON [HHSurvey].[Trip] ([travelers_total]) ON [PRIMARY]
 GO

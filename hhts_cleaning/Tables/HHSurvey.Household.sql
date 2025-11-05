@@ -154,8 +154,8 @@ CREATE TABLE [HHSurvey].[Household]
 [home_lat] [float] NULL,
 [home_lng] [float] NULL,
 [sample_geog] [sys].[geography] NULL,
-[valid_from] [datetime2] GENERATED ALWAYS AS ROW START NOT NULL CONSTRAINT [HHSurvey_Household_valid_from_default] DEFAULT (sysutcdatetime()),
-[valid_to] [datetime2] GENERATED ALWAYS AS ROW END NOT NULL CONSTRAINT [HHSurvey_Household_valid_to_default] DEFAULT ('9999-12-31 23:59:59.9999999'),
+[valid_from] [datetime2] GENERATED ALWAYS AS ROW START HIDDEN NOT NULL CONSTRAINT [HHSurvey_Household_valid_from_default] DEFAULT (sysutcdatetime()),
+[valid_to] [datetime2] GENERATED ALWAYS AS ROW END HIDDEN NOT NULL CONSTRAINT [HHSurvey_Household_valid_to_default] DEFAULT ('9999-12-31 23:59:59.9999999'),
 PERIOD FOR SYSTEM_TIME (valid_from, valid_to),
 CONSTRAINT [PK_hhid] PRIMARY KEY CLUSTERED ([hhid]) WITH (FILLFACTOR=80) ON [PRIMARY]
 ) ON [PRIMARY]
