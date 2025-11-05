@@ -13,7 +13,7 @@ Tripnum placeholders before resequencing: HH=999, Self=997, Imputed=998
 Revision codes appended: '16d,' / '16s,' / '16i,'
 Assumptions: dest_is_home column exists; if not, home identified by dest_purpose=1.
 */
-CREATE    PROCEDURE [HHSurvey].[fill_gaps_between_trips]
+CREATE   PROCEDURE [HHSurvey].[fill_gaps_between_trips]
   @GoogleKey NVARCHAR(100),
   @Debug BIT = 0,
   @Seed BIGINT = NULL
@@ -140,32 +140,70 @@ BEGIN
         IF OBJECT_ID('tempdb..#hh_inserted') IS NOT NULL DROP TABLE #hh_inserted;
         CREATE TABLE #hh_inserted(new_trip_recid DECIMAL(19,0) PRIMARY KEY, gap_id INT NOT NULL);
 
-        -- List donor trips to copy (respect compression trimming)
+        -- Ensure clean staging table before building CTEs
+        IF OBJECT_ID('tempdb..#hh_stage_trips') IS NOT NULL DROP TABLE #hh_stage_trips;
+
+        -- List donor trips to copy (respect compression trimming) and stage with deduplication
         ;WITH chosen AS (
           SELECT s.*, g.person_id AS target_person_id, g.hhid, g.pernum
           FROM #hh_selected s JOIN @gaps g ON g.gap_id=s.gap_id
+        ), to_clone AS (
+          SELECT chosen.hhid, chosen.target_person_id AS person_id, chosen.pernum,
+                 999 AS tripnum, 1 AS psrc_inserted, '16d,' AS revision_code,
+                 t.dest_purpose,
+                 t.mode_1, t.modes, t.travelers_hh,
+                 CAST(0 AS INT) AS travelers_nonhh,
+                 t.travelers_hh AS travelers_total,
+                 t.origin_lat, t.origin_lng, t.origin_geog, t.dest_lat, t.dest_lng, t.dest_geog,
+                 t.distance_miles, t.depart_time_timestamp, t.arrival_time_timestamp,
+                 DATEDIFF(MINUTE, t.depart_time_timestamp, t.arrival_time_timestamp) AS travel_time,
+                 t.recid AS src_recid
+          FROM chosen
+          JOIN #hh_candidates c ON c.gap_id=chosen.gap_id AND c.donor_person_id=chosen.donor_person_id
+            AND c.depart_time>=chosen.seq_start AND c.arrive_time<=chosen.seq_end
+          JOIN HHSurvey.Trip t ON t.recid=c.recid
+        ), dedup AS (
+          SELECT hhid, person_id, pernum, tripnum, psrc_inserted, revision_code, dest_purpose,
+                 mode_1, modes, travelers_hh, travelers_nonhh, travelers_total,
+                 origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
+                 distance_miles, depart_time_timestamp, arrival_time_timestamp, travel_time,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY person_id, depart_time_timestamp, arrival_time_timestamp
+                   ORDER BY depart_time_timestamp, arrival_time_timestamp, src_recid
+                 ) AS rn
+          FROM to_clone
         )
+        SELECT hhid, person_id, pernum, tripnum, psrc_inserted, revision_code, dest_purpose,
+               mode_1, modes, travelers_hh, travelers_nonhh, travelers_total,
+               origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
+               distance_miles, depart_time_timestamp, arrival_time_timestamp, travel_time
+        INTO #hh_stage_trips
+        FROM dedup
+        WHERE rn = 1;
+
+        -- Enforce uniqueness within staged rows; only psrc_inserted=1 rows are indexed
+        CREATE UNIQUE INDEX UX_hh_stage_trips
+          ON #hh_stage_trips(person_id, depart_time_timestamp, arrival_time_timestamp)
+          WHERE psrc_inserted = 1
+          WITH (IGNORE_DUP_KEY = ON);
+
+        -- Final insert from stage with overlap guard against existing rows
         INSERT INTO HHSurvey.Trip (
           hhid, person_id, pernum, tripnum, psrc_inserted, revision_code, dest_purpose,
           mode_1, modes, travelers_hh, travelers_nonhh, travelers_total,
           origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
           distance_miles, depart_time_timestamp, arrival_time_timestamp, travel_time
         )
-        SELECT chosen.hhid, chosen.target_person_id, chosen.pernum, 999, 1, '16d,', t.dest_purpose,
-               t.mode_1, t.modes, t.travelers_hh,
-               0 AS travelers_nonhh, t.travelers_hh AS travelers_total,
-               t.origin_lat, t.origin_lng, t.origin_geog, t.dest_lat, t.dest_lng, t.dest_geog,
-               t.distance_miles, t.depart_time_timestamp, t.arrival_time_timestamp,
-               DATEDIFF(MINUTE, t.depart_time_timestamp, t.arrival_time_timestamp) AS travel_time
-        FROM chosen
-        JOIN #hh_candidates c ON c.gap_id=chosen.gap_id AND c.donor_person_id=chosen.donor_person_id
-          AND c.depart_time>=chosen.seq_start AND c.arrive_time<=chosen.seq_end
-        JOIN HHSurvey.Trip t ON t.recid=c.recid
+        SELECT s.hhid, s.person_id, s.pernum, s.tripnum, s.psrc_inserted, s.revision_code, s.dest_purpose,
+               s.mode_1, s.modes, s.travelers_hh, s.travelers_nonhh, s.travelers_total,
+               s.origin_lat, s.origin_lng, s.origin_geog, s.dest_lat, s.dest_lng, s.dest_geog,
+               s.distance_miles, s.depart_time_timestamp, s.arrival_time_timestamp, s.travel_time
+        FROM #hh_stage_trips s
         WHERE NOT EXISTS (
           SELECT 1 FROM HHSurvey.Trip r
-          WHERE r.person_id = chosen.target_person_id
-            AND r.depart_time_timestamp < t.arrival_time_timestamp
-            AND r.arrival_time_timestamp > t.depart_time_timestamp
+          WHERE r.person_id = s.person_id
+            AND r.depart_time_timestamp < s.arrival_time_timestamp
+            AND r.arrival_time_timestamp > s.depart_time_timestamp
         );
         INSERT INTO #hh_inserted(new_trip_recid, gap_id)
         SELECT t2.recid, g.gap_id
@@ -267,6 +305,9 @@ BEGIN
         IF OBJECT_ID('tempdb..#self_inserted') IS NOT NULL DROP TABLE #self_inserted;
         CREATE TABLE #self_inserted(new_trip_recid DECIMAL(19,0) PRIMARY KEY, gap_id INT);
 
+        -- Clean staging table before CTE chain
+        IF OBJECT_ID('tempdb..#self_stage_trips') IS NOT NULL DROP TABLE #self_stage_trips;
+
         ;WITH chosen AS (
           SELECT s.*, g.gap_start_time, g.gap_end_time, g.hhid, g.pernum
           FROM #self_selected s JOIN @gaps g ON g.gap_id=s.gap_id
@@ -298,29 +339,63 @@ BEGIN
                  DATEADD(SECOND, shift_seconds, depart_time) AS final_depart,
                  DATEADD(SECOND, shift_seconds, arrive_time) AS final_arrive
           FROM shifted
+        ), prepare AS (
+          SELECT g.hhid, g.person_id, g.pernum, 997 AS tripnum, 1 AS psrc_inserted, '16s,' AS revision_code,
+                 src.dest_purpose,
+                 src.mode_1, src.modes, src.travelers_hh, src.travelers_nonhh, src.travelers_total,
+                 src.origin_lat, src.origin_lng, src.origin_geog, src.dest_lat, src.dest_lng, src.dest_geog,
+                 src.distance_miles, ft.final_depart AS depart_time_timestamp, ft.final_arrive AS arrival_time_timestamp,
+                 DATEDIFF(MINUTE, ft.final_depart, ft.final_arrive) AS travel_time,
+                 src.recid AS src_recid
+          FROM final_times ft
+          JOIN #self_candidates sc ON sc.recid=ft.recid
+          JOIN HHSurvey.Trip src ON src.recid = sc.recid
+          JOIN #self_selected sel ON sel.gap_id=ft.gap_id
+          JOIN @gaps g ON g.gap_id=sel.gap_id
+          WHERE ft.final_depart >= g.gap_start_time AND ft.final_arrive <= g.gap_end_time
+        ), dedup AS (
+          SELECT hhid, person_id, pernum, tripnum, psrc_inserted, revision_code, dest_purpose,
+                 mode_1, modes, travelers_hh, travelers_nonhh, travelers_total,
+                 origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
+                 distance_miles, depart_time_timestamp, arrival_time_timestamp, travel_time,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY person_id, depart_time_timestamp, arrival_time_timestamp
+                   ORDER BY depart_time_timestamp, arrival_time_timestamp, src_recid
+                 ) AS rn
+          FROM prepare
         )
+        SELECT hhid, person_id, pernum, tripnum, psrc_inserted, revision_code, dest_purpose,
+               mode_1, modes, travelers_hh, travelers_nonhh, travelers_total,
+               origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
+               distance_miles, depart_time_timestamp, arrival_time_timestamp, travel_time
+        INTO #self_stage_trips
+        FROM dedup
+        WHERE rn = 1;
+
+        -- Enforce uniqueness within staged rows; only psrc_inserted=1 rows are indexed
+        CREATE UNIQUE INDEX UX_self_stage_trips
+          ON #self_stage_trips(person_id, depart_time_timestamp, arrival_time_timestamp)
+          WHERE psrc_inserted = 1
+          WITH (IGNORE_DUP_KEY = ON);
+
+        -- Final insert from stage with overlap guard against existing rows
         INSERT INTO HHSurvey.Trip (
           hhid, person_id, pernum, tripnum, psrc_inserted, revision_code, dest_purpose,
           mode_1, modes, travelers_hh, travelers_nonhh, travelers_total,
           origin_lat, origin_lng, origin_geog, dest_lat, dest_lng, dest_geog,
           distance_miles, depart_time_timestamp, arrival_time_timestamp, travel_time
         )
-        SELECT g.hhid, g.person_id, g.pernum, 997, 1, '16s,', src.dest_purpose,
-               src.mode_1, src.modes, src.travelers_hh, src.travelers_nonhh, src.travelers_total,
-               src.origin_lat, src.origin_lng, src.origin_geog, src.dest_lat, src.dest_lng, src.dest_geog,
-               src.distance_miles, ft.final_depart, ft.final_arrive,
-               DATEDIFF(MINUTE, ft.final_depart, ft.final_arrive) AS travel_time
-        FROM final_times ft
-        JOIN #self_candidates sc ON sc.recid=ft.recid
-        JOIN HHSurvey.Trip src ON src.recid = sc.recid
-        JOIN #self_selected sel ON sel.gap_id=ft.gap_id
-        JOIN @gaps g ON g.gap_id=sel.gap_id
-        WHERE ft.final_depart >= g.gap_start_time AND ft.final_arrive <= g.gap_end_time
-          AND NOT EXISTS (
-            SELECT 1 FROM HHSurvey.Trip r
-            WHERE r.person_id=g.person_id
-              AND r.depart_time_timestamp < ft.final_arrive
-              AND r.arrival_time_timestamp > ft.final_depart);
+        SELECT s.hhid, s.person_id, s.pernum, s.tripnum, s.psrc_inserted, s.revision_code, s.dest_purpose,
+               s.mode_1, s.modes, s.travelers_hh, s.travelers_nonhh, s.travelers_total,
+               s.origin_lat, s.origin_lng, s.origin_geog, s.dest_lat, s.dest_lng, s.dest_geog,
+               s.distance_miles, s.depart_time_timestamp, s.arrival_time_timestamp, s.travel_time
+        FROM #self_stage_trips s
+        WHERE NOT EXISTS (
+          SELECT 1 FROM HHSurvey.Trip r
+          WHERE r.person_id = s.person_id
+            AND r.depart_time_timestamp < s.arrival_time_timestamp
+            AND r.arrival_time_timestamp > s.depart_time_timestamp
+        );
         INSERT INTO #self_inserted(new_trip_recid, gap_id)
         SELECT t2.recid, g.gap_id
         FROM @gaps g
