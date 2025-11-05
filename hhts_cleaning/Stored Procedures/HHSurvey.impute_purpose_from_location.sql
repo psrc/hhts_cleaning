@@ -16,43 +16,43 @@ AS BEGIN
 
              Applies only to trips whose current dest_purpose qualifies for imputation
              (NullFlags, 97=other, 60=change mode, 45/46/48=PUDO variants) so that we
-             do not overwrite already valid purposes. Distances use 100m threshold.
+             do not overwrite already valid purposes. Distances use 150m threshold.
 
              Priority / precedence:
-                 1. Home (purpose=1) wins over Work/School if within 100m of home.
+                 1. Home (purpose=1) wins over Work/School if within 150m of home.
                  2. Work (purpose=10) applied only if still imputation-eligible after Home.
                  3. School (age-based: <5 =>26, <19 =>21, else 22) applied last.
              ------------------------------------------------------------------------- */
         BEGIN TRANSACTION;
-                -- Home proximity (<=100m)
+                -- Home proximity (<=150m)
                 UPDATE t
                 SET t.dest_purpose = 1,
                     t.revision_code = CONCAT(t.revision_code,'5,')
                 FROM HHSurvey.Trip AS t
                 JOIN HHSurvey.Household AS h ON t.hhid = h.hhid
                 WHERE t.dest_geog IS NOT NULL AND h.home_geog IS NOT NULL
-                    AND t.dest_geog.STDistance(h.home_geog) <= 100
+                    AND t.dest_geog.STDistance(h.home_geog) <= 150
                     AND (
                                 t.dest_purpose IN (SELECT flag_value FROM HHSurvey.NullFlags)
                                 OR t.dest_purpose IN (97,60,45,46,48)
                             )
                     AND t.dest_purpose <> 1; -- avoid redundant writes
 
-                -- Work proximity (<=100m) only if still imputation-eligible (not already set to 1 by previous step)
+                -- Work proximity (<=150m) only if still imputation-eligible (not already set to 1 by previous step)
                 UPDATE t
                 SET t.dest_purpose = 10,
                     t.revision_code = CONCAT(t.revision_code,'5,')
                 FROM HHSurvey.Trip AS t
                 JOIN HHSurvey.Person AS p ON t.person_id = p.person_id
                 WHERE t.dest_geog IS NOT NULL AND p.work_geog IS NOT NULL
-                    AND t.dest_geog.STDistance(p.work_geog) <= 100
+                    AND t.dest_geog.STDistance(p.work_geog) <= 150
                     AND (
                                 t.dest_purpose IN (SELECT flag_value FROM HHSurvey.NullFlags)
                                 OR t.dest_purpose IN (97,60,45,46,48)
                             )
                     AND t.dest_purpose NOT IN (1,10); -- preserve home if already set
 
-                -- School proximity (<=100m) age-tiered purpose codes
+                -- School proximity (<=150m) age-tiered purpose codes
                 UPDATE t
                 SET t.dest_purpose = CASE 
                                                                 WHEN p.age_detailed < 5 THEN 26  -- daycare / preschool
@@ -63,7 +63,7 @@ AS BEGIN
                 FROM HHSurvey.Trip AS t
                 JOIN HHSurvey.Person AS p ON t.person_id = p.person_id
                 WHERE t.dest_geog IS NOT NULL AND p.school_geog IS NOT NULL
-                    AND t.dest_geog.STDistance(p.school_geog) <= 100
+                    AND t.dest_geog.STDistance(p.school_geog) <= 150
                     AND (
                                 t.dest_purpose IN (SELECT flag_value FROM HHSurvey.NullFlags)
                                 OR t.dest_purpose IN (97,60,45,46,48)
@@ -82,7 +82,7 @@ AS BEGIN
         WHERE (t.dest_purpose IN(SELECT flag_value FROM HHSurvey.NullFlags UNION SELECT 97)                                     --"other"
                OR (t.dest_purpose=60 AND DATEDIFF(Minute, t.arrival_time_timestamp, nxt.depart_time_timestamp) > 60)            --"change mode" but didn't qualify for trip linking
                OR t.dest_purpose IN(45, 46, 48) AND DATEDIFF(Minute, t.arrival_time_timestamp, nxt.depart_time_timestamp) > 35) --PUDO but unreasonably long
-        AND t.dest_is_home<>1 AND t.dest_is_work<>1;
+        AND COALESCE(t.dest_is_home, 0) = 0 AND COALESCE(t.dest_is_work, 0) = 0;
     COMMIT TRANSACTION;		
 
     DECLARE @i int
