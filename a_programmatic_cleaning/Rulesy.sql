@@ -38,7 +38,7 @@ DECLARE @GoogleKey nvarchar = '<insert Google API key>']
 
 	-- Staff must verify/update the following code groupings:
 		-- mode groupings
-			INSERT INTO HHSurvey.transitmodes(mode_id) VALUES (23),(24),(105),(108);
+			INSERT INTO HHSurvey.transitmodes(mode_id) VALUES (23),(105),(108);
 			INSERT INTO HHSurvey.automodes(mode_id)    VALUES (100),(101),(102),(106);
 			INSERT INTO HHSurvey.walkmodes(mode_id)    VALUES (1);
 			INSERT INTO HHSurvey.bikemodes(mode_id)    VALUES (103),(107);	
@@ -73,26 +73,27 @@ DECLARE @GoogleKey nvarchar = '<insert Google API key>']
 	ALTER TABLE HHSurvey.Trip ENABLE TRIGGER [tr_trip];         -- Enables the audit trail/logger; complement is 'ALTER TABLE HHSurvey.Trip DISABLE TRIGGER [tr_trip];'
 	EXECUTE HHSurvey.tripnum_update;                            -- Tripnum must be sequential or later steps will fail.
 
-/* STEP 3.  Fill out missing elements; make clear corrections */
-	EXECUTE HHSurvey.fill_gaps_between_trips @GoogleKey='<key>', @Debug=0; -- Inserts a bridge trip where discontinuity exists (e.g. the App was turned off)
+/* STEP 3.  Imputations and corrections */
+	EXECUTE HHSurvey.fill_gaps_between_trips @GoogleKey='<GoogleRoutesAPIKey>', @Debug=0; -- Inserts a bridge trip where discontinuity exists (e.g. the App was turned off)
 	EXECUTE HHSurvey.update_membercounts;                       -- Revise travelers count to reflect passengers (lazy response?)	
 	EXECUTE HHSurvey.fix_mistaken_passenger_carryovers;         -- When 'driver' code or work purpose are attributed to accompanying passengers
 	EXECUTE HHSurvey.dest_purpose_updates;                      -- Destination purpose revisions (extensive)
 	EXECUTE HHSurvey.initial_origin_purpose;                    -- Origin purpose assignment: Assumes purpose codes: 1 (home) and 10 (primary work)
+	EXECUTE HHSurvey.impute_purpose_from_location @GoogleKey='<GooglePlacesAPIKey>';   -- Google Places; utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
 	EXECUTE HHSurvey.impute_purpose_from_location NULL;         -- Nominatim; utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
-	EXECUTE HHSurvey.impute_purpose_from_location @GoogleKey='<key>';   -- Google Places; utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
-	EXECUTE HHSurvey.impute_missing_mode @GoogleKey='<key>', @dry_run=0; -- Utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
+	EXECUTE HHSurvey.impute_missing_mode @GoogleKey='<GoogleRoutesAPIKey>', @dry_run=0; -- Utilizes table HHSurvey.EntityType_purpose_types, for verification see step 0 above
+	EXECUTE HHSurvey.revise_excessive_speed_trips @GoogleKey='<GoogleRoutesAPIKey>';   -- Change departure or arrival times for records that would qualify for 'excessive speed' flag
+	EXECUTE HHSurvey.trip_removals;                             -- Creates removed_trip table & removes duplicated trips
+ 	EXECUTE HHSurvey.recalculate_after_edit;                    -- JIC before linking
 
-/* STEP 4.	Adjust speed/time; trip linking */ 
-	EXECUTE HHSurvey.revise_excessive_speed_trips @GoogleKey;   -- Change departure or arrival times for records that would qualify for 'excessive speed' flag
+/* STEP 4. Trip linking */ 
     DROP TABLE IF EXISTS HHSurvey.trip_ingredients_done;
 	EXECUTE HHSurvey.link_trips_systemically;                   -- Executes trip linking. Can be called from Fixie for edited trips
 	EXECUTE HHSurvey.cleanup_trips;	                            -- Snap origin points to prior destination, when proximate
 
-/* STEP 5. Removals and insertions */
+/* STEP 5. Wrap up */
 	--FYI HHSurvey.insert_silent_passenger_trips exists but intentionally is NOT used; RSG is also doing something on this issue.
-	EXECUTE HHSurvey.trip_removals;                             -- Creates removed_trip table & removes duplicated 'go home' trips created by rMove
-	EXECUTE HHSurvey.single_trip_home_completion @GoogleKey='<key>', @ImputeMissing=1 -- Insert return trips; remove lone trips either going nowhere or not to/from home.
+	EXECUTE HHSurvey.single_trip_home_completion @GoogleKey='<GoogleRoutesAPIKey>', @ImputeMissing=1 -- Insert return trips; remove lone trips either going nowhere or not to/from home.
 	EXECUTE HHSurvey.recalculate_after_edit;
 
 /* STEP 6. Flag inconsistencies */
