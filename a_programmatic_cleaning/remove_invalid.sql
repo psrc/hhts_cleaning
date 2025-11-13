@@ -6,24 +6,15 @@
                   OUTPUT deleted.* INTO HHSurvey.trip_invalid
                   WHERE EXISTS (SELECT 1 FROM cte WHERE trip.person_id = cte.person_id);
 
-      WITH travel_valid AS (SELECT t.hhid, t.travel_date, t.person_id 
+      WITH travel_valid AS (SELECT t.hhid, t.traveldate, t.person_id 
                               FROM HHSurvey.Trip AS t JOIN HHSurvey.Person AS p ON t.person_id = p.person_id 
-                              WHERE p.age_detailed > 1 AND DATEPART(dw, t.travel_date) BETWEEN 2 and 6
-                              GROUP BY t.hhid, t.travel_date, t.person_id),
+                              WHERE p.age_detailed > 1 AND DATEPART(dw, t.traveldate) BETWEEN 2 and 6
+                              GROUP BY t.hhid, t.traveldate, t.person_id),
       stay_valid AS (SELECT d.hhid, d.travel_date, d.person_id FROM HHSurvey.Day AS d JOIN HHSurvey.Person AS p ON d.person_id = p.person_id  
-                  WHERE p.age_detailed > 1 AND DATEPART(dw,d.travel_date) BETWEEN 2 and 6 
-                      AND (d.notravel_vacation = 1 
-                        OR d.notravel_telecommute = 1
-                        OR d.notravel_housework = 1
-                        OR d.notravel_kidsbreak = 1
-                        OR d.notravel_kidshomeschool = 1
-                        OR d.notravel_notransport = 1
-                        OR d.notravel_sick = 1
-                        OR d.notravel_delivery = 1
-                        OR d.notravel_other = 1)
+                  WHERE p.age_detailed > 1 AND DATEPART(dw, d.travel_date) BETWEEN 2 and 6 
                   GROUP BY d.hhid, d.travel_date, d.person_id),
-            either_valid AS (SELECT tv.hhid, tv.travel_date, tv.person_id FROM travel_valid AS tv UNION SELECT sv.hhid, sv.travel_date, sv.person_id FROM stay_valid AS sv),          
-            valid_hhmember_count AS (SELECT hhid, travel_date, count(person_id) AS member_count FROM either_valid GROUP BY hhid, travel_date),
+            either_valid AS (SELECT tv.hhid, tv.traveldate, tv.person_id FROM travel_valid AS tv UNION SELECT sv.hhid, sv.travel_date, sv.person_id FROM stay_valid AS sv),          
+            valid_hhmember_count AS (SELECT hhid, traveldate, count(person_id) AS member_count FROM either_valid GROUP BY hhid, traveldate),
             highest_valid AS (SELECT hhid, max(member_count) AS shared_valid_hhmember FROM valid_hhmember_count GROUP BY hhid),
             members_over5 AS (SELECT p.hhid, count(p.person_id) AS memcount FROM HHSurvey.Person AS p WHERE p.age_detailed > 1 GROUP BY p.hhid)
       SELECT h.hhid, h.hhsize, h.numadults, hv.shared_valid_hhmember --INTO HHSurvey.invalid_hh
@@ -31,6 +22,7 @@
       WHERE m5.memcount > hv.shared_valid_hhmember ORDER BY h.numadults - hv.shared_valid_hhmember DESC;     
 
 --Create tables for invalid records
+      DROP TABLE IF EXISTS HHSurvey.household_invalid, HHSurvey.vehicle_invalid, HHSurvey.day_invalid, HHSurvey.person_invalid;
 
       SELECT TOP 0 * INTO HHSurvey.household_invalid
             FROM HHSurvey.Household 
@@ -51,6 +43,12 @@
             FROM HHSurvey.Person
             UNION ALL SELECT TOP 0 * 
             FROM HHSurvey.Person;
+
+      SELECT TOP 0 * INTO HHSurvey.trip_invalid
+            FROM HHSurvey.Trip
+            UNION ALL SELECT TOP 0 * 
+            FROM HHSurvey.Trip;
+
 
 --remove invalid records into these tables
 
