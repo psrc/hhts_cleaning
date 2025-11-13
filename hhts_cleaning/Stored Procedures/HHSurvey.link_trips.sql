@@ -299,14 +299,17 @@ CREATE NONCLUSTERED INDEX IX_transit_bounds_person_link ON #transit_bounds(perso
      -- Add mode_in to mode_out mapping table
      DECLARE @mode_in_out TABLE (mode_in INT, mode_out INT);
      INSERT INTO @mode_in_out (mode_in, mode_out) VALUES
-          (1,1),
-          (995,995),
-          (100,13),
-          (101,14),
-          (103,2),
-          (104,97),
-          (106,12),
-          (107,9);
+      (1,1),
+      (995,995),
+      (100,18),
+      (108,17),
+      (101,5),
+      (103,2),
+      (104,97),
+      (105,8),
+      (102,8),
+      (106,12),
+      (107,2);
 
     -- Internal (or all, if no transit) distinct modes in order
     DROP TABLE IF EXISTS #internal_modes;
