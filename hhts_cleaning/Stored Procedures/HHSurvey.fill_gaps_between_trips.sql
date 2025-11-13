@@ -184,8 +184,7 @@ BEGIN
         -- Enforce uniqueness within staged rows; only psrc_inserted=1 rows are indexed
         CREATE UNIQUE INDEX UX_hh_stage_trips
           ON #hh_stage_trips(person_id, depart_time_timestamp, arrival_time_timestamp)
-          WHERE psrc_inserted = 1
-          WITH (IGNORE_DUP_KEY = ON);
+          WHERE psrc_inserted = 1;
 
         -- Final insert from stage with overlap guard against existing rows
         INSERT INTO HHSurvey.Trip (
@@ -375,8 +374,7 @@ BEGIN
         -- Enforce uniqueness within staged rows; only psrc_inserted=1 rows are indexed
         CREATE UNIQUE INDEX UX_self_stage_trips
           ON #self_stage_trips(person_id, depart_time_timestamp, arrival_time_timestamp)
-          WHERE psrc_inserted = 1
-          WITH (IGNORE_DUP_KEY = ON);
+          WHERE psrc_inserted = 1;
 
         -- Final insert from stage with overlap guard against existing rows
         INSERT INTO HHSurvey.Trip (
