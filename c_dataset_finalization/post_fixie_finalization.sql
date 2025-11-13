@@ -82,7 +82,7 @@
         t.linked_trip_num = r.linked_trip_num,
         t.imputed_joint_trip = r.imputed_joint_trip,
         t.imputed_record_type = r.imputed_record_type
-    FROM HHSurvey.Trip t JOIN HouseholdTravelSurvey2025.delivered_20251021.ex_trip_unlinked r ON t.initial_tripid=r.tripid;
+    FROM HHSurvey.Trip t JOIN HouseholdTravelSurvey2025.delivered_20251021.ex_trip_unlinked r ON t.tripid=r.tripid;
 
 /* Update geographically calculated variables and geoassignments */
 
@@ -105,7 +105,7 @@
           @GoogleRoutesAPI, t.depart_time_timestamp) AS mi_min_result
     FROM HHSurvey.Trip AS t
     WHERE (t.distance_miles IS NULL OR t.distance_miles=0) AND t.origin_lng BETWEEN -125 AND -116 AND t.dest_lng BETWEEN -125 AND -115 
-    AND t.origin_lat BETWEEN 44 and 50 AND t.dest_lat BETWEEN 44 AND 50 AND recid BETWEEN 8001 AND 20000)
+    AND t.origin_lat BETWEEN 44 and 50 AND t.dest_lat BETWEEN 44 AND 50)
     UPDATE tu 
       SET tu.distance_miles = CAST(LEFT(cte.mi_min_result, CHARINDEX(',', cte.mi_min_result)-1) AS float),
           tu.distance_beeline_meters = tu.origin_geog.STDistance(tu.dest_geog)
@@ -127,23 +127,30 @@
       CREATE SPATIAL INDEX origin_geom_idx ON HHSurvey.Trip(origin_geom) USING GEOMETRY_AUTO_GRID
       WITH (BOUNDING_BOX = (xmin = 1095800, ymin = -97600, xmax = 1622700, ymax = 477600));
     GO
-    UPDATE t SET t.d_in_region=CASE WHEN r.Shape.STIntersects(t.dest_geom)=1 THEN 1 ELSE 0 END
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r ON 1=1;
+    -- Use spatial predicate in JOIN to enable spatial index usage
+    UPDATE t
+    SET t.d_in_region = CASE WHEN r.Shape IS NOT NULL THEN 1 ELSE 0 END
+    FROM HHSurvey.Trip AS t
+    LEFT JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r
+      ON r.Shape.STIntersects(t.dest_geom) = 1;
     GO
-    UPDATE t SET  t.o_in_region=CASE WHEN r.Shape.STIntersects(t.dest_geom)=1 THEN 1 ELSE 0 END
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r ON 1=1;
+    UPDATE t
+    SET t.o_in_region = CASE WHEN r.Shape IS NOT NULL THEN 1 ELSE 0 END
+    FROM HHSurvey.Trip AS t
+    LEFT JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r
+      ON r.Shape.STIntersects(t.origin_geom) = 1;
     GO
 
     UPDATE t SET t.dest_city=r.city_name 
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.PSRC_REGION AS r ON r.Shape.STIntersects(t.dest_geom)=1
+    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.PSRC_REGION AS r ON r.Shape.STContains(t.dest_geom)=1
     WHERE r.feat_type='city';
     GO
     UPDATE t SET t.dest_zip=r.zipcode 
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.ZIP_CODES AS r ON r.Shape.STIntersects(t.dest_geom)=1;
+    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.ZIP_CODES AS r ON r.Shape.STContains(t.dest_geom)=1;
     GO 
     /*--not used?
     UPDATE t SET t.o_puma10=r.pumace10
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.REG10PUMA AS r ON r.Shape.STIntersects(t.dest_geom)=1;
+    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.REG10PUMA AS r ON r.Shape.STContains(t.dest_geom)=1;
     GO */
 
   -- For county, first use rectangular approximation first for performance
@@ -157,31 +164,31 @@
     GO
     UPDATE t
     SET t.dest_county = r.county_fip
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.COUNTY_LINES AS r ON t.dest_geom.STIntersects(r.Shape)=1
+    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.COUNTY_LINES AS r ON t.dest_geom.STContains(r.Shape)=1
     WHERE r.psrc=1 AND t.dest_county IS NULL;
     GO
     UPDATE t
     SET t.o_bg=bg.geoid20
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.BLOCKGRP2020 AS bg ON bg.Shape.STIntersects(t.origin_geom)=1
+    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.BLOCKGRP2020 AS bg ON bg.Shape.STContains(t.origin_geom)=1
     GO
     UPDATE t
     SET t.d_bg=bg.geoid20
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.BLOCKGRP2020 AS bg ON bg.Shape.STIntersects(t.dest_geom)=1
+    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.BLOCKGRP2020 AS bg ON bg.Shape.STContains(t.dest_geom)=1
     GO
     UPDATE t
     SET t.o_puma10=CONCAT('53', p.pumace10)
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.REG10PUMA AS p ON p.Shape.STIntersects(t.origin_geom)=1
+    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.REG10PUMA AS p ON p.Shape.STContains(t.origin_geom)=1
     GO
     UPDATE t
     SET t.d_puma10=CONCAT('53', p.pumace10)
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.REG10PUMA AS p ON p.Shape.STIntersects(t.dest_geom)=1
+    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.REG10PUMA AS p ON p.Shape.STContains(t.dest_geom)=1
     GO
     ALTER TABLE HHSurvey.household ADD home_geom GEOMETRY;
     GO
     UPDATE h 
     SET h.home_lat=h.home_geog.Lat,
         h.home_lng=h.home_geog.Long
-    FROM HHSurvey.Household AS h WHERE h.home_geog.Lat<>h.home_lat OR h.home_geog.Long<>h.home_lng;
+    FROM HHSurvey.Household AS h;
     GO
     UPDATE h SET h.home_geom=Elmer.dbo.ToXY(h.home_lng, h.home_lat) FROM HHSurvey.Household AS h;
     GO
@@ -191,27 +198,30 @@
 
     UPDATE h
     SET h.home_bg_2010=b.geoid10
-    FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.BLOCKGRP2010 AS b ON b.Shape.STIntersects(h.home_geom)=1;
+    FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.BLOCKGRP2010 AS b ON b.Shape.STContains(h.home_geom)=1;
 
     UPDATE h
     SET h.home_bg_2020=b.geoid20
-    FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.BLOCKGRP2020 AS b ON b.Shape.STIntersects(h.home_geom)=1;
+    FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.BLOCKGRP2020 AS b ON b.Shape.STContains(h.home_geom)=1;
 
     UPDATE h
     SET h.home_puma_2012=CONCAT('53',p.pumace10)
-    FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.BLOCKGRP2010 AS b ON h.home_bg_2010=b.geoid10 JOIN ElmerGeo.dbo.REG10PUMA AS p ON b.Shape.STIntersects(p.Shape)=1;
+    FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.BLOCKGRP2010 AS b ON h.home_bg_2010=b.geoid10 JOIN ElmerGeo.dbo.REG10PUMA AS p ON b.Shape.STContains(p.Shape)=1;
 
     UPDATE h
     SET h.home_puma_2022=CONCAT('53',p.pumace20)
-    FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.BLOCKGRP2020 AS b ON h.home_bg_2020=b.geoid20 JOIN ElmerGeo.dbo.REG20PUMA AS p ON b.Shape.STIntersects(p.Shape)=1;
+    FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.BLOCKGRP2020 AS b ON h.home_bg_2020=b.geoid20 JOIN ElmerGeo.dbo.REG20PUMA AS p ON b.Shape.STContains(p.Shape)=1;
     GO
 
-    UPDATE h SET h.home_in_region=CASE WHEN r.Shape.STIntersects(h.home_geom)=1 THEN 1 ELSE 0 END
-    FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r ON 1=1;
+    UPDATE h
+    SET h.home_in_region = CASE WHEN r.Shape IS NOT NULL THEN 1 ELSE 0 END
+    FROM HHSurvey.Household AS h
+    LEFT JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r
+      ON r.Shape.STIntersects(h.home_geom) = 1;
     GO
 
     /*--Not used?
-    WITH cte AS (SELECT h.hhid, r.city_name FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.PSRC_REGION AS r ON r.Shape.STIntersects(h.home_geom)=1)
+    WITH cte AS (SELECT h.hhid, r.city_name FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.PSRC_REGION AS r ON r.Shape.STContains(h.home_geom)=1)
     UPDATE h2 
     SET h2.cityofseattle= CASE WHEN cte.city_name='Seattle' THEN 1 ELSE 0 END,
         h2.cityofbellevue= CASE WHEN cte.city_name='Bellevue' THEN 1 ELSE 0 END
@@ -238,21 +248,27 @@
     CREATE SPATIAL INDEX school_geom_idx ON HHSurvey.Person(school_geom) USING GEOMETRY_AUTO_GRID
       WITH (BOUNDING_BOX = (xmin = 1095800, ymin = -97600, xmax = 1622700, ymax = 477600));
     GO
-    UPDATE p SET p.work_in_region=CASE WHEN r.Shape.STIntersects(p.work_geom)=1 THEN 1 ELSE 0 END
-    FROM HHSurvey.Person AS p JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r ON 1=1; 
+    UPDATE p
+    SET p.work_in_region = CASE WHEN r.Shape IS NOT NULL THEN 1 ELSE 0 END
+    FROM HHSurvey.Person AS p
+    LEFT JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r
+      ON r.Shape.STIntersects(p.work_geom) = 1; 
     GO
-    UPDATE p SET p.school_in_region=CASE WHEN r.Shape.STIntersects(p.school_geom)=1 THEN 1 ELSE 0 END
-    FROM HHSurvey.Person AS p JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r ON 1=1; 
+    UPDATE p
+    SET p.school_in_region = CASE WHEN r.Shape IS NOT NULL THEN 1 ELSE 0 END
+    FROM HHSurvey.Person AS p
+    LEFT JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r
+      ON r.Shape.STIntersects(p.school_geom) = 1; 
     GO
 
     UPDATE p
     SET p.school_bg=bg.geoid20
-    FROM HHSurvey.Person AS p JOIN ElmerGeo.dbo.BLOCKGRP2020 AS bg ON bg.Shape.STIntersects(p.school_geom)=1
+    FROM HHSurvey.Person AS p JOIN ElmerGeo.dbo.BLOCKGRP2020 AS bg ON bg.Shape.STContains(p.school_geom)=1
     GO
 
     UPDATE p
     SET p.school_puma10=CONCAT('53', rp.pumace10)
-    FROM HHSurvey.Person AS p JOIN ElmerGeo.dbo.REG10PUMA AS rp ON rp.Shape.STIntersects(p.school_geom)=1
+    FROM HHSurvey.Person AS p JOIN ElmerGeo.dbo.REG10PUMA AS rp ON rp.Shape.STContains(p.school_geom)=1
     GO
 
 /* Remove invalid records from primary tables */
@@ -303,6 +319,7 @@
     UPDATE HHSurvey.Trip 
     SET survey_year=2025 WHERE survey_year IS NULL;
     GO
+    SET DATEFIRST 7;
     UPDATE t 
     SET t.depart_date=CONVERT(NVARCHAR, t.depart_time_timestamp, 23),
       t.depart_dow=CASE WHEN DATEPART(DW, t.depart_time_timestamp)=1 THEN 7 ELSE DATEPART(DW, t.depart_time_timestamp) -1 END,
@@ -322,8 +339,7 @@
     UPDATE t 
     SET t.day_id=cte.day_id,
       t.travel_date=CONVERT(NVARCHAR, DATEADD(HOUR, -3, t.depart_time_timestamp), 23),
-      t.travel_dow=CASE WHEN DATEPART(DW, DATEADD(HOUR, -3, t.depart_time_timestamp))=1 THEN 7 ELSE DATEPART(DW, DATEADD(HOUR, -3, t.depart_time_timestamp)) -1 END,
-        t.day_iscomplete=t.day_iscomplete
+      t.travel_dow=CASE WHEN DATEPART(DW, DATEADD(HOUR, -3, t.depart_time_timestamp))=1 THEN 7 ELSE DATEPART(DW, DATEADD(HOUR, -3, t.depart_time_timestamp)) -1 END
       FROM HHSurvey.Trip AS t JOIN cte ON cte.person_id=t.person_id AND cte.travel_date=CONVERT(NVARCHAR, DATEADD(HOUR, -3, t.depart_time_timestamp), 23);
     GO
 
@@ -359,12 +375,8 @@
     FROM HHSurvey.Trip AS t;
 
     UPDATE t 
-    SET t.driver= COALESCE(CASE WHEN (t.mode_acc NOT IN(SELECT mode_id FROM HHSurvey.automodes) AND
-                  t.mode_1 NOT IN(SELECT mode_id FROM HHSurvey.automodes) AND 
-                              t.mode_2 NOT IN(SELECT mode_id FROM HHSurvey.automodes) AND
-                  t.mode_3 NOT IN(SELECT mode_id FROM HHSurvey.automodes) AND
-                  t.mode_4 NOT IN(SELECT mode_id FROM HHSurvey.automodes) AND 
-                  t.mode_egr NOT IN(SELECT mode_id FROM HHSurvey.automodes)) THEN 0 ELSE t.driver END, 0)
+    SET t.driver= CASE WHEN EXISTS (SELECT 1 FROM (VALUES (mode_acc),(mode_1),(mode_2),(mode_3),(mode_4),(mode_egr)) v(m) 
+                                    WHERE v.m IN (SELECT mode_id FROM HHSurvey.automodes)) THEN t.driver ELSE 0 END
     FROM HHSurvey.Trip AS t;
 
     --update hhmember field
@@ -391,8 +403,9 @@
 
     WITH cte AS (SELECT t.person_id, count(*) AS tripcount FROM HHSurvey.Trip AS t GROUP BY t.person_id)
     UPDATE p 
-    SET p.num_trips=cte.tripcount
-    FROM HHSurvey.Person AS p JOIN cte ON cte.person_id=p.person_id WHERE cte.tripcount<>p.num_trips;
+    SET p.num_trips = cte.tripcount
+    FROM HHSurvey.Person AS p JOIN cte ON cte.person_id=p.person_id 
+    WHERE ISNULL(cte.tripcount, -1) <> ISNULL(p.num_trips, -1);
     GO
 
     WITH cte AS (SELECT t.hhid, count(*) AS tripcount FROM HHSurvey.Trip AS t GROUP BY t.hhid)
@@ -401,33 +414,7 @@
     FROM HHSurvey.Household AS h JOIN cte ON cte.hhid=h.hhid WHERE cte.tripcount<>h.num_trips;
 
 /* Update Day variables derived from trip attributes */
-    UPDATE d
-    SET d.num_trips = COALESCE(tb.tripcount,0),
-      d.loc_start = CASE WHEN (tf.origin_purpose IS NULL OR tf.origin_purpose IN (SELECT flag_value FROM HHSurvey.NullFlags)) THEN 995
-                WHEN tf.origin_purpose = 1 THEN 1
-                WHEN tf.origin_purpose = 152 THEN 7
-                WHEN tf.origin_purpose IN (10,11,14) THEN 10
-                WHEN tf.origin_purpose IN (52,150) THEN 4
-                ELSE 3 END,
-      d.loc_end = CASE WHEN (tl.dest_purpose IS NULL OR tl.dest_purpose IN (SELECT flag_value FROM HHSurvey.NullFlags)) THEN 995
-              WHEN tl.dest_purpose = 1 THEN 1
-              WHEN tl.dest_purpose = 152 THEN 7
-              WHEN tl.dest_purpose IN (10,11,14) THEN 10
-              WHEN tl.dest_purpose IN (52,150) THEN 6
-              ELSE 3 END,
-      d.no_travel = CASE WHEN tb.tripcount > 0 THEN 0 ELSE 1 END
-    FROM HHSurvey.Day AS d
-    LEFT JOIN (
-      SELECT person_id, day_id,
-          MIN(tripnum) AS first_tripnum,
-          MAX(tripnum) AS last_tripnum,
-          COUNT(*)     AS tripcount
-      FROM HHSurvey.Trip
-      GROUP BY person_id, day_id
-    ) AS tb ON tb.person_id = d.person_id AND tb.day_id = d.day_id
-    LEFT JOIN HHSurvey.Trip AS tf ON tf.person_id = d.person_id AND tf.day_id = d.day_id AND tf.tripnum = tb.first_tripnum
-    LEFT JOIN HHSurvey.Trip AS tl ON tl.person_id = d.person_id AND tl.day_id = d.day_id AND tl.tripnum = tb.last_tripnum;
-    GO
+    -- Moved below #trip_bounds creation to reuse precomputed aggregates
 
     -- Precompute first/last trip numbers for each person/day (with tripcount) for downstream adjustments
     IF OBJECT_ID('tempdb..#trip_bounds') IS NOT NULL DROP TABLE #trip_bounds;
@@ -441,6 +428,28 @@
     -- Supporting index to accelerate joins
     CREATE NONCLUSTERED INDEX IX_trip_bounds_person_day ON #trip_bounds(person_id, day_id)
     INCLUDE (first_tripnum, last_tripnum, tripcount);
+
+  -- Day-level derivations using #trip_bounds for efficiency and consistency
+  UPDATE d
+  SET d.num_trips = COALESCE(tb.tripcount,0),
+    d.loc_start = CASE WHEN (tf.origin_purpose IS NULL OR tf.origin_purpose IN (SELECT flag_value FROM HHSurvey.NullFlags)) THEN 995
+               WHEN tf.origin_purpose = 1 THEN 1
+               WHEN tf.origin_purpose = 152 THEN 7
+               WHEN tf.origin_purpose IN (10,11,14) THEN 10
+               WHEN tf.origin_purpose IN (52,150) THEN 4
+               ELSE 3 END,
+    d.loc_end = CASE WHEN (tl.dest_purpose IS NULL OR tl.dest_purpose IN (SELECT flag_value FROM HHSurvey.NullFlags)) THEN 995
+             WHEN tl.dest_purpose = 1 THEN 1
+             WHEN tl.dest_purpose = 152 THEN 7
+             WHEN tl.dest_purpose IN (10,11,14) THEN 10
+             WHEN tl.dest_purpose IN (52,150) THEN 6
+             ELSE 3 END,
+    d.no_travel = CASE WHEN tb.tripcount > 0 THEN 0 ELSE 1 END
+  FROM HHSurvey.Day AS d
+  LEFT JOIN #trip_bounds AS tb ON tb.person_id = d.person_id AND tb.day_id = d.day_id
+  LEFT JOIN HHSurvey.Trip AS tf ON tf.person_id = d.person_id AND tf.day_id = d.day_id AND tf.tripnum = tb.first_tripnum
+  LEFT JOIN HHSurvey.Trip AS tl ON tl.person_id = d.person_id AND tl.day_id = d.day_id AND tl.tripnum = tb.last_tripnum;
+  GO
 
     -- Start-of-day not-home adjustment (uses first_tripnum)
     UPDATE d 
@@ -469,7 +478,10 @@
       FROM HHSurvey.Trip AS t
       JOIN #trip_bounds tb ON tb.person_id = t.person_id AND tb.day_id = t.day_id AND t.tripnum = tb.last_tripnum
       JOIN HHSurvey.Trip AS t_next ON t.person_id = t_next.person_id AND t.tripnum + 1 = t_next.tripnum
-      WHERE DATEPART(DAY, DATEDIFF(HOUR, -3, t.depart_time_timestamp)) > DATEPART(DAY, DATEDIFF(HOUR, -3, t.arrival_time_timestamp))
+      -- Cross-midnight (relative to 3am day boundary) detection:
+      -- Shift both timestamps back 3 hours so that activity between midnight and 2:59:59 becomes part of the prior survey day.
+      -- If the shifted arrival date is later than the shifted departure date, the trip spans the boundary.
+      WHERE DATEDIFF(DAY, DATEADD(HOUR, -3, t.depart_time_timestamp), DATEADD(HOUR, -3, t.arrival_time_timestamp)) > 0
     )
     UPDATE d 
     SET d.loc_end = 5
@@ -480,7 +492,8 @@
       FROM HHSurvey.Trip AS t
       JOIN #trip_bounds tb ON tb.person_id = t.person_id AND tb.day_id = t.day_id AND t.tripnum = tb.last_tripnum
       JOIN HHSurvey.Trip AS t_next ON t.person_id = t_next.person_id AND t.tripnum + 1 = t_next.tripnum
-      WHERE DATEPART(DAY, DATEDIFF(HOUR, -3, t.depart_time_timestamp)) > DATEPART(DAY, DATEDIFF(HOUR, -3, t.arrival_time_timestamp))
+      -- Cross-midnight (relative to 3am day boundary) detection for start of following day
+      WHERE DATEDIFF(DAY, DATEADD(HOUR, -3, t.depart_time_timestamp), DATEADD(HOUR, -3, t.arrival_time_timestamp)) > 0
     )
     UPDATE d 
     SET d.loc_start = 5
@@ -515,4 +528,5 @@
     GO
     UPDATE HHSurvey.Trip SET initial_tripid=tripid;
     GO
-    UPDATE HHSurvey.Trip SET tripid=CONCAT(person_id, FORMAT(tripnum, '000'));
+    UPDATE HHSurvey.Trip SET tripid=person_id * 1000 + tripnum
+      WHERE tripid <> person_id * 1000 + tripnum;
