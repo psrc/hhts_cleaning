@@ -127,7 +127,7 @@
       CREATE SPATIAL INDEX origin_geom_idx ON HHSurvey.Trip(origin_geom) USING GEOMETRY_AUTO_GRID
       WITH (BOUNDING_BOX = (xmin = 1095800, ymin = -97600, xmax = 1622700, ymax = 477600));
     GO
-    -- Use spatial predicate in JOIN to enable spatial index usage
+
     UPDATE t
     SET t.d_in_region = CASE WHEN r.Shape IS NOT NULL THEN 1 ELSE 0 END
     FROM HHSurvey.Trip AS t
@@ -501,26 +501,121 @@
     DROP TABLE #trip_bounds;
     GO
 
-/* Update Household variables derived from trip attributes */ 
+/* Update completion variables */ 
 
-    WITH cte AS (SELECT hhid, count(*) AS completedaycount FROM HHSurvey.Day WHERE pernum=1 AND day_iscomplete=1 GROUP BY hhid)
-    UPDATE h
-    SET h.numdayscomplete=cte.completedaycount
-    FROM HHSurvey.Household AS h JOIN cte ON h.hhid=cte.hhid;
+    UPDATE t 
+    SET t.svy_complete = 1 
+    FROM HHSurvey.Trip AS t
+    WHERE t.dest_purpose NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
+      AND t.mode_1 NOT IN (SELECT flag_value FROM HHSurvey.NullFlags);
+
+    ;WITH cte AS (
+      SELECT t.person_id,
+             t.day_id,
+             SUM(t.svy_complete) AS num_complete_trip_surveys,
+             COUNT(*)            AS num_trips
+      FROM HHSurvey.Trip AS t
+      GROUP BY t.person_id, t.day_id
+    )
+    UPDATE HHSurvey.Day
+    SET num_complete_trip_surveys = cte.num_complete_trip_surveys,
+      num_trips = cte.num_trips
+    FROM HHSurvey.Day
+    JOIN cte
+      ON cte.person_id = HHSurvey.Day.person_id
+     AND cte.day_id = HHSurvey.Day.day_id;
+
+    UPDATE HHSurvey.Day
+    SET day_iscomplete = CASE
+      WHEN (num_complete_trip_surveys > 0 OR no_travel = 0)
+       AND loc_start NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
+       AND loc_end   NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
+      THEN 1 ELSE 0 END;
+
+    IF OBJECT_ID('tempdb..#hh_complete_days') IS NOT NULL DROP TABLE #hh_complete_days;
+
+    SELECT s.hhid, s.travel_date, s.travel_dow
+    INTO #hh_complete_days
+    FROM (
+      SELECT d.hhid,
+             d.travel_date,
+             MIN(d.travel_dow) AS travel_dow,
+             COUNT(*)          AS complete_participant_count
+      FROM HHSurvey.Day AS d
+      WHERE d.day_iscomplete = 1
+      GROUP BY d.hhid, d.travel_date
+    ) AS s
+    JOIN HHSurvey.Household AS h
+      ON h.hhid = s.hhid
+    WHERE s.complete_participant_count >= h.num_participants;
+
+    CREATE CLUSTERED INDEX IX_hh_complete_days_hhid_date
+      ON #hh_complete_days(hhid, travel_date);
+    CREATE NONCLUSTERED INDEX IX_hh_complete_days_hhid_dow
+      ON #hh_complete_days(hhid, travel_dow)
+      INCLUDE (travel_date);
+
+    UPDATE d 
+    SET d.hh_day_iscomplete = 0
+    FROM HHSurvey.Day AS d; 
+
+    UPDATE d 
+    SET d.hh_day_iscomplete = 1
+    FROM HHSurvey.Day AS d
+    JOIN #hh_complete_days AS hcd 
+      ON d.hhid = hcd.hhid AND d.travel_date = hcd.travel_date;
+
+    UPDATE t 
+    SET t.hh_day_iscomplete = 0
+    FROM HHSurvey.Trip AS t;
+
+    UPDATE t 
+    SET t.hh_day_iscomplete = d.hh_day_iscomplete
+    FROM HHSurvey.Trip AS t 
+    JOIN HHSurvey.Day AS d 
+      ON t.day_id = d.day_id;    
+
+    ;WITH cte AS (
+      SELECT hhid, COUNT(*) AS n_complete_days
+      FROM #hh_complete_days
+      GROUP BY hhid
+    )
+    UPDATE hh
+    SET hh.numdayscomplete = COALESCE(cte.n_complete_days, 0)
+    FROM HHSurvey.Household AS hh
+    LEFT JOIN cte
+      ON cte.hhid = hh.hhid;
     GO
 
-    WITH cte AS (SELECT hhid, [1],[2],[3],[4],[5],[6],[7] FROM 
-          (SELECT hhid, travel_dow, COALESCE(count(*),0) AS completedaycount FROM HHSurvey.Day WHERE pernum=1 AND day_iscomplete=1 GROUP BY hhid, travel_dow) AS s1
-          PIVOT (max(s1.completedaycount) FOR travel_dow IN([1],[2],[3],[4],[5],[6],[7])) AS p1)
+    ;WITH cte AS (
+      SELECT hhid,
+             SUM(CASE WHEN travel_dow = 1 THEN 1 ELSE 0 END) AS num_complete_mon,
+             SUM(CASE WHEN travel_dow = 2 THEN 1 ELSE 0 END) AS num_complete_tue,
+             SUM(CASE WHEN travel_dow = 3 THEN 1 ELSE 0 END) AS num_complete_wed,
+             SUM(CASE WHEN travel_dow = 4 THEN 1 ELSE 0 END) AS num_complete_thu,
+             SUM(CASE WHEN travel_dow = 5 THEN 1 ELSE 0 END) AS num_complete_fri,
+             SUM(CASE WHEN travel_dow = 6 THEN 1 ELSE 0 END) AS num_complete_sat,
+             SUM(CASE WHEN travel_dow = 7 THEN 1 ELSE 0 END) AS num_complete_sun,
+             SUM(CASE WHEN travel_dow BETWEEN 1 AND 5 THEN 1 ELSE 0 END) AS num_days_complete_weekday,
+             SUM(CASE WHEN travel_dow IN (6,7) THEN 1 ELSE 0 END) AS num_days_complete_weekend
+      FROM #hh_complete_days
+      GROUP BY hhid
+    )
     UPDATE h
-    SET	h.num_complete_mon = COALESCE(cte.[1],0),
-      h.num_complete_tue = COALESCE(cte.[2],0),
-      h.num_complete_wed = COALESCE(cte.[3],0),
-      h.num_complete_thu = COALESCE(cte.[4],0),
-      h.num_complete_fri = COALESCE(cte.[5],0),
-      h.num_complete_sat = COALESCE(cte.[6],0),
-      h.num_complete_sun = COALESCE(cte.[7],0)
-    FROM HHSurvey.Household AS h JOIN cte ON h.hhid=cte.hhid;
+    SET h.num_complete_mon = COALESCE(cte.num_complete_mon, 0),
+        h.num_complete_tue = COALESCE(cte.num_complete_tue, 0),
+        h.num_complete_wed = COALESCE(cte.num_complete_wed, 0),
+        h.num_complete_thu = COALESCE(cte.num_complete_thu, 0),
+        h.num_complete_fri = COALESCE(cte.num_complete_fri, 0),
+        h.num_complete_sat = COALESCE(cte.num_complete_sat, 0),
+        h.num_complete_sun = COALESCE(cte.num_complete_sun, 0),
+        h.num_days_complete_weekday = COALESCE(cte.num_days_complete_weekday, 0),
+        h.num_days_complete_weekend = COALESCE(cte.num_days_complete_weekend, 0)
+    FROM HHSurvey.Household AS h
+    LEFT JOIN cte
+      ON cte.hhid = h.hhid;
+
+    DROP TABLE #hh_complete_days;
 
 /* Shift unique key to separate field and update tripid to reflect current tripnum */    
 
