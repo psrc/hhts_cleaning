@@ -356,13 +356,13 @@
 /* Update RSG metacategories using the raw data as lookup */
     WITH cte AS (SELECT dest_purpose, dest_purpose_cat FROM HouseholdTravelSurvey2025.delivered_20251021.ex_trip_unlinked GROUP BY dest_purpose, dest_purpose_cat)
     UPDATE t 
-    SET t.dest_purpose_cat=cte.dest_purpose_cat
-    FROM HHSurvey.Trip AS t JOIN cte ON t.dest_purpose=cte.dest_purpose WHERE t.dest_purpose_cat<>cte.dest_purpose_cat;
+    SET t.d_purpose_category=cte.dest_purpose_cat
+    FROM HHSurvey.Trip AS t JOIN cte ON t.dest_purpose=cte.dest_purpose WHERE t.d_purpose_category<>cte.dest_purpose_cat;
 
     WITH cte AS (SELECT origin_purpose, origin_purpose_cat FROM HouseholdTravelSurvey2025.delivered_20251021.ex_trip_unlinked GROUP BY origin_purpose, origin_purpose_cat)
     UPDATE t 
-    SET t.origin_purpose_cat=cte.origin_purpose_cat
-    FROM HHSurvey.Trip AS t JOIN cte ON t.origin_purpose=cte.origin_purpose WHERE t.origin_purpose_cat<>cte.origin_purpose_cat;
+    SET t.o_purpose_category=cte.origin_purpose_cat
+    FROM HHSurvey.Trip AS t JOIN cte ON t.origin_purpose=cte.origin_purpose WHERE t.o_purpose_category<>cte.origin_purpose_cat;
 
 /* Individual field revisions under specific circumstances */
 
@@ -444,7 +444,7 @@
              WHEN tl.dest_purpose IN (10,11,14) THEN 10
              WHEN tl.dest_purpose IN (52,150) THEN 6
              ELSE 3 END,
-    d.no_travel = CASE WHEN tb.tripcount > 0 THEN 0 ELSE 1 END
+    d.no_travel = CASE WHEN tb.tripcount > 0 THEN 1 ELSE d.no_travel END
   FROM HHSurvey.Day AS d
   LEFT JOIN #trip_bounds AS tb ON tb.person_id = d.person_id AND tb.day_id = d.day_id
   LEFT JOIN HHSurvey.Trip AS tf ON tf.person_id = d.person_id AND tf.day_id = d.day_id AND tf.tripnum = tb.first_tripnum
@@ -512,7 +512,7 @@
     ;WITH cte AS (
       SELECT t.person_id,
              t.day_id,
-             SUM(t.svy_complete) AS num_complete_trip_surveys,
+             SUM(COALESCE(t.svy_complete,0)) AS num_complete_trip_surveys,
              COUNT(*)            AS num_trips
       FROM HHSurvey.Trip AS t
       GROUP BY t.person_id, t.day_id
@@ -526,10 +526,10 @@
      AND cte.day_id = HHSurvey.Day.day_id;
 
     UPDATE HHSurvey.Day
-    SET day_iscomplete = CASE
+    SET is_complete = CASE
       WHEN (num_complete_trip_surveys > 0 OR no_travel = 0)
-       AND loc_start NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
-       AND loc_end   NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
+       --AND loc_start NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
+       --AND loc_end   NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
       THEN 1 ELSE 0 END;
 
     IF OBJECT_ID('tempdb..#hh_complete_days') IS NOT NULL DROP TABLE #hh_complete_days;
@@ -542,7 +542,7 @@
              MIN(d.travel_dow) AS travel_dow,
              COUNT(*)          AS complete_participant_count
       FROM HHSurvey.Day AS d
-      WHERE d.day_iscomplete = 1
+      WHERE d.is_complete = 1
       GROUP BY d.hhid, d.travel_date
     ) AS s
     JOIN HHSurvey.Household AS h
@@ -556,11 +556,11 @@
       INCLUDE (travel_date);
 
     UPDATE d 
-    SET d.hh_day_iscomplete = 0
+    SET d.hh_day_complete = 0
     FROM HHSurvey.Day AS d; 
 
     UPDATE d 
-    SET d.hh_day_iscomplete = 1
+    SET d.hh_day_complete = 1
     FROM HHSurvey.Day AS d
     JOIN #hh_complete_days AS hcd 
       ON d.hhid = hcd.hhid AND d.travel_date = hcd.travel_date;
@@ -570,7 +570,7 @@
     FROM HHSurvey.Trip AS t;
 
     UPDATE t 
-    SET t.hh_day_iscomplete = d.hh_day_iscomplete
+    SET t.hh_day_iscomplete = d.hh_day_complete
     FROM HHSurvey.Trip AS t 
     JOIN HHSurvey.Day AS d 
       ON t.day_id = d.day_id;    
@@ -625,3 +625,19 @@
     GO
     UPDATE HHSurvey.Trip SET tripid=person_id * 1000 + tripnum
       WHERE tripid <> person_id * 1000 + tripnum;
+
+/* Add binned age variable */
+
+UPDATE p 
+SET p.age = CASE WHEN p.age_detailed < 5               THEN 1
+                 WHEN p.age_detailed BETWEEN 5 AND 15  THEN 2
+                 WHEN p.age_detailed BETWEEN 16 AND 17 THEN 3
+                 WHEN p.age_detailed BETWEEN 18 AND 24 THEN 4
+                 WHEN p.age_detailed BETWEEN 25 AND 34 THEN 5
+                 WHEN p.age_detailed BETWEEN 35 AND 44 THEN 6
+                 WHEN p.age_detailed BETWEEN 45 AND 54 THEN 7
+                 WHEN p.age_detailed BETWEEN 55 AND 64 THEN 8
+                 WHEN p.age_detailed BETWEEN 65 AND 74 THEN 9
+                 WHEN p.age_detailed BETWEEN 75 AND 84 THEN 10
+                 WHEN p.age_detailed > 84 THEN 11 END 
+FROM HHSurvey.Person p;
