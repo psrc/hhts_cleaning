@@ -617,6 +617,53 @@
 
     DROP TABLE #hh_complete_days;
 
+SELECT TOP (0) p.* INTO HHSurvey.no_complete_hh_days_person FROM HHSurvey.Person p;
+SELECT TOP (0) h.* INTO HHSurvey.no_complete_hh_days_household FROM HHSurvey.Household h;
+SELECT TOP (0) d.* INTO HHSurvey.no_complete_hh_days_day FROM HHSurvey.Day d;
+SELECT TOP (0) t.* INTO HHSurvey.no_complete_hh_days_trip FROM HHSurvey.Trip t JOIN HHSurvey.Day d ON t.day_id=d.day_id;
+SELECT TOP (0) v.* INTO HHSurvey.no_complete_hh_days_vehicle FROM HHSurvey.Vehicle v;
+
+-- Remove persons without any complete days
+DELETE p
+OUTPUT deleted.* INTO HHSurvey.no_complete_hh_days_person
+FROM HHSurvey.Person AS p
+WHERE NOT EXISTS (
+  SELECT 1 FROM HHSurvey.Day AS d WHERE d.person_id = p.person_id
+     AND d.is_complete = 1);
+
+DELETE p
+OUTPUT deleted.* INTO HHSurvey.no_complete_hh_days_person
+FROM HHSurvey.Person AS p
+WHERE EXISTS (
+  SELECT 1 FROM HHSurvey.no_complete_hh_days_person pno WHERE pno.hhid = p.hhid);
+
+-- Remove households, days, trips, vehicles from households without any shared complete days
+DELETE h
+OUTPUT deleted.* INTO HHSurvey.no_complete_hh_days_household
+FROM HHSurvey.Household AS h
+WHERE EXISTS (
+  SELECT 1 FROM HHSurvey.no_complete_hh_days_person p WHERE h.hhid = p.hhid);
+
+DELETE d
+OUTPUT deleted.* INTO HHSurvey.no_complete_hh_days_day
+FROM HHSurvey.Day AS d
+WHERE EXISTS (
+  SELECT 1 FROM HHSurvey.no_complete_hh_days_person p WHERE d.hhid = p.hhid);
+
+DELETE t
+OUTPUT deleted.* INTO HHSurvey.no_complete_hh_days_trip
+FROM HHSurvey.Trip AS t
+WHERE EXISTS (
+  SELECT 1 FROM HHSurvey.no_complete_hh_days_person p WHERE t.hhid = p.hhid);
+
+DELETE v
+OUTPUT deleted.* INTO HHSurvey.no_complete_hh_days_vehicle
+FROM HHSurvey.Vehicle AS v
+WHERE EXISTS (
+  SELECT 1 FROM HHSurvey.no_complete_hh_days_person p WHERE v.hhid = p.hhid);
+ 
+
+
 /* Shift unique key to separate field and update tripid to reflect current tripnum */    
 
     ALTER TABLE HHSurvey.Trip ADD initial_tripid decimal(19,0) NULL;
