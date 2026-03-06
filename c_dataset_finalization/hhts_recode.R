@@ -4,7 +4,7 @@ recode_spec <- list(
     
     remap = list(
       end_day = c(`2`=3L, `3`=997L, `4`=2L, `5`=4L, `6`=5L),
-      begin_day = c(`2`=3L, `3`=997L, `2`=6L)
+      begin_day = c(`2`=3L, `3`=997L, `6`=2L)
   )
   
 ),
@@ -108,7 +108,7 @@ recode_spec <- list(
       ,
       transit_access = \(x) {
         x[x %in% 12:16] <- x[x %in% 12:16] - 5L
-        x[x %in% c(1:2,5)] <- x[x %in% 1:2] + 1L
+        x[x %in% c(1:2,5)] <- x[x %in% c(1:2,5)] + 1L
         x[x == 8L] <- 1L
         x[x == 18L] <- 4L
         x[x == 17L] <- 5L
@@ -117,7 +117,7 @@ recode_spec <- list(
       },
       transit_egress = \(x) {
         x[x %in% 12:16] <- x[x %in% 12:16] - 5L
-        x[x %in% c(1:2,5)] <- x[x %in% 1:2] + 1L
+        x[x %in% c(1:2,5)] <- x[x %in% c(1:2,5)] + 1L
         x[x == 8L] <- 1L
         x[x == 18L] <- 4L
         x[x == 17L] <- 5L

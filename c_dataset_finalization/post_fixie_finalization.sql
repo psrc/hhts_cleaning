@@ -502,6 +502,8 @@
     GO
 
 /* Update completion variables */ 
+    UPDATE HHSurvey.Day
+    SET is_complete = 0;
 
     UPDATE t 
     SET t.svy_complete = 1 
@@ -525,12 +527,23 @@
       ON cte.person_id = HHSurvey.Day.person_id
      AND cte.day_id = HHSurvey.Day.day_id;
 
-    UPDATE HHSurvey.Day
+    UPDATE d
+    SET is_complete = CASE
+      WHEN (num_complete_trip_surveys > 0 OR no_travel = 0) AND d.proxy_complete=1
+       --AND loc_start NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
+       --AND loc_end   NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
+      THEN 1 ELSE 0 END
+      FROM HHSurvey.Day d JOIN HHSurvey.Person p ON p.person_id=d.person_id
+      WHERE p.proxy=1;
+
+    UPDATE d
     SET is_complete = CASE
       WHEN (num_complete_trip_surveys > 0 OR no_travel = 0)
        --AND loc_start NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
        --AND loc_end   NOT IN (SELECT flag_value FROM HHSurvey.NullFlags)
-      THEN 1 ELSE 0 END;
+      THEN 1 ELSE 0 END
+      FROM HHSurvey.Day d JOIN HHSurvey.Person p ON p.person_id=d.person_id
+      WHERE p.proxy=0;
 
     IF OBJECT_ID('tempdb..#hh_complete_days') IS NOT NULL DROP TABLE #hh_complete_days;
 
@@ -616,12 +629,12 @@
       ON cte.hhid = h.hhid;
 
     DROP TABLE #hh_complete_days;
-
+/*
 SELECT TOP (0) p.* INTO HHSurvey.no_complete_hh_days_person FROM HHSurvey.Person p;
 SELECT TOP (0) h.* INTO HHSurvey.no_complete_hh_days_household FROM HHSurvey.Household h;
 SELECT TOP (0) d.* INTO HHSurvey.no_complete_hh_days_day FROM HHSurvey.Day d;
 SELECT TOP (0) t.* INTO HHSurvey.no_complete_hh_days_trip FROM HHSurvey.Trip t JOIN HHSurvey.Day d ON t.day_id=d.day_id;
-SELECT TOP (0) v.* INTO HHSurvey.no_complete_hh_days_vehicle FROM HHSurvey.Vehicle v;
+SELECT TOP (0) v.* INTO HHSurvey.no_complete_hh_days_vehicle FROM HHSurvey.Vehicle v;*/
 
 -- Remove persons without any complete days
 DELETE p
