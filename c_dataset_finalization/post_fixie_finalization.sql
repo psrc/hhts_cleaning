@@ -142,7 +142,7 @@
     GO
 
     UPDATE t SET t.dest_city=r.city_name 
-    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.PSRC_REGION AS r ON r.Shape.STContains(t.dest_geom)=1
+    FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.psrc_region_evw AS r ON r.Shape.STContains(t.dest_geom)=1
     WHERE r.feat_type='city';
     GO
     UPDATE t SET t.dest_zip=r.zipcode 
@@ -219,15 +219,6 @@
     LEFT JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r
       ON r.Shape.STIntersects(h.home_geom) = 1;
     GO
-
-    /*--Not used?
-    WITH cte AS (SELECT h.hhid, r.city_name FROM HHSurvey.Household AS h JOIN ElmerGeo.dbo.PSRC_REGION AS r ON r.Shape.STContains(h.home_geom)=1)
-    UPDATE h2 
-    SET h2.cityofseattle= CASE WHEN cte.city_name='Seattle' THEN 1 ELSE 0 END,
-        h2.cityofbellevue= CASE WHEN cte.city_name='Bellevue' THEN 1 ELSE 0 END
-    FROM HHSurvey.Household AS h2 JOIN cte ON h2.hhid=cte.hhid;
-    GO 
-    */
 
     ALTER TABLE HHSurvey.Person ADD work_geom GEOMETRY, school_geom GEOMETRY, work_in_region smallint, school_in_region smallint;
     GO

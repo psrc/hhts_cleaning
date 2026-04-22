@@ -3,9 +3,10 @@ GO
 SET ANSI_NULLS ON
 GO
 
-CREATE   PROCEDURE [HHSurvey].[insert_return_home]
+CREATE OR ALTER PROCEDURE [HHSurvey].[insert_return_home]
     @target_recid int = NULL,
-    @startdatetime nvarchar(19) = NULL
+    @startdatetime nvarchar(19) = NULL,
+    @GoogleKey nvarchar(50) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -68,9 +69,9 @@ BEGIN
             TRY_CONVERT(float, Elmer.dbo.rgx_replace(r.api_response,'.*,(.*)$','$1',1)) AS api_minutes
         FROM cand AS c
         OUTER APPLY (
-            SELECT api_response = Elmer.dbo.route_miles_minutes(
-                    c.origin_geog,
-                    c.home_geog,
+            SELECT api_response = Elmer.dbo.route_mi_min(
+                    c.origin_geog.Long, c.origin_geog.Lat,
+                    c.home_geog.Long, c.home_geog.Lat,
                     CASE
                         WHEN c.mode_1 = 1 THEN 'walking'
                         WHEN c.mode_1 IN (SELECT mode_id FROM HHSurvey.automodes) THEN 'driving'
@@ -78,6 +79,7 @@ BEGIN
                         WHEN c.mode_1 IN (SELECT mode_id FROM HHSurvey.bikemodes) THEN 'cycling'
                         ELSE 'driving'
                     END,
+                    @GoogleKey,
                     c.depart_time_timestamp
                 )
         ) AS r;
@@ -103,7 +105,7 @@ BEGIN
             s.home_geog.Lat, s.home_geog.Long,
             s.origin_geog.Lat, s.origin_geog.Long,
             s.depart_time_timestamp,
-            CASE WHEN s.api_minutes IS NOT NULL THEN DATEADD(MINUTE, ROUND(s.api_minutes, 0), s.depart_time_timestamp) END,
+            CASE WHEN s.api_minutes IS NOT NULL THEN DATEADD(MINUTE, ROUND(s.api_minutes, 0), s.depart_time_timestamp) END AS arrival_time_timestamp,
             s.api_miles,
             1, s.mode_1, s.travelers_hh, s.travelers_nonhh, s.travelers_total
         FROM #tmpApi2Home AS s;

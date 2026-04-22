@@ -23,11 +23,11 @@
 
 --Input query to get API times for added return-home trips
 
-		SELECT t.recid, Left(Elmer.dbo.rgx_extract(t.psrc_comment,'\d\d:',1),2) AS depart_hour, Right(Elmer.dbo.rgx_extract(t.psrc_comment,':\d\d',1),2) AS depart_minute, 
+		SELECT t.recid, CONCAT(t.traveldate, ' ', Left(Elmer.dbo.rgx_extract(t.psrc_comment,'\d\d:',1),2), ':', Right(Elmer.dbo.rgx_extract(t.psrc_comment,':\d\d',1),2)) AS start_time, 
 		CONCAT(CAST(t.dest_lat AS VARCHAR(20)),', ',CAST(t.dest_lng AS VARCHAR(20))) AS start_coord, CONCAT(CAST(h.home_lat AS VARCHAR(20)),', ',CAST(h.home_lng AS VARCHAR(20))) AS home_coord,
 		t.psrc_comment 
 			FROM HHSurvey.Trip AS t JOIN HHSurvey.Household AS h ON t.hhid = h.hhid
-			WHERE Elmer.dbo.rgx_find(t.psrc_comment,'^ADD RETURN HOME',1)=1 AND t.dest_geog.STDistance(h.home_geog) > 10;
+			WHERE Elmer.dbo.rgx_find(t.psrc_comment,'^INSERT RETURN HOME',1)=1 AND t.dest_geog.STDistance(h.home_geog) > 10;
 
 --Input query to get purposes
 
@@ -140,7 +140,7 @@ UPDATE t SET t.region_tripends=t.region_tripends+1
 FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.PSRC_REGIONAL_OUTLINE AS r ON r.Shape.STIntersects(t.origin_geom)=1;
 
 UPDATE t SET t.dest_city=r.city_name 
-FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.PSRC_REGION AS r ON r.Shape.STIntersects(t.dest_geom)=1
+FROM HHSurvey.Trip AS t JOIN ElmerGeo.dbo.psrc_region_evw AS r ON r.Shape.STIntersects(t.dest_geom)=1
 WHERE r.feat_type='city';
 
 UPDATE t SET t.dest_zip=r.zipcode 

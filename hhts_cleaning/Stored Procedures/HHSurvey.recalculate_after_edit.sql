@@ -2,7 +2,7 @@ SET QUOTED_IDENTIFIER ON
 GO
 SET ANSI_NULLS ON
 GO
-    CREATE   PROCEDURE [HHSurvey].[recalculate_after_edit]
+    CREATE OR ALTER PROCEDURE [HHSurvey].[recalculate_after_edit]
         @target_person_id decimal = NULL --optional to limit to the record just edited 
     AS BEGIN
         SET NOCOUNT ON

@@ -26,6 +26,7 @@ AS BEGIN
 		WHERE t.distance_miles = 0 AND (t.revision_code IS NULL OR t.revision_code NOT LIKE '%8,%'))
 	DELETE FROM HHSurvey.Trip OUTPUT deleted.* INTO HHSurvey.removed_trip
 		WHERE EXISTS (SELECT 1 FROM cte WHERE Trip.recid = cte.recid);
+
 	COMMIT TRANSACTION;
 
 END

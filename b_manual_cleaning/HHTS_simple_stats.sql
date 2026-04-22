@@ -44,7 +44,7 @@ SELECT error_flag, [1] AS rMove, [2] AS rSurvey
 FROM
 (
     SELECT 
-        CASE WHEN h.hhgroup = 11 THEN 1 ELSE 2 END AS hhgroup, 
+        CASE WHEN h.hhgroup IN(5,8,11) THEN 1 ELSE 2 END AS hhgroup, 
         tef.error_flag, 
         t.recid
     FROM HHSurvey.trip_error_flags AS tef 
